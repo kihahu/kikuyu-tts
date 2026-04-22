@@ -91,6 +91,7 @@ python scripts/colab_train_vits_scratch.py \
 ## 5) Evaluate checkpoints and select best
 
 Prepare a CSV (one row per checkpoint) with:
+
 - `checkpoint`
 - `synthesis_success_rate`
 - `clipping_rate`
@@ -118,7 +119,9 @@ python scripts/prepare_local_integration.py \
 ```
 
 This creates:
+
 - local model bundle
 - tokenizer files
 - evaluation summary copy
 - `integration_metadata.json` for the next local `kikuyu-tts` wiring step
+
