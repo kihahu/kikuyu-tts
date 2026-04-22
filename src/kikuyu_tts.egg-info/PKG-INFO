@@ -1,0 +1,18 @@
+Metadata-Version: 2.4
+Name: kikuyu-tts
+Version: 0.1.0
+Summary: English-to-Kikuyu translation and speech synthesis pipeline on Apple Silicon.
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: mlx-audio
+Requires-Dist: transformers>=4.48.0
+Requires-Dist: torch>=2.3.0
+Requires-Dist: accelerate>=0.34.0
+Requires-Dist: sentencepiece>=0.2.0
+Requires-Dist: safetensors>=0.4.5
+Requires-Dist: numpy>=1.26.0
+Requires-Dist: soundfile>=0.13.1
+
+# kikuyu-tts
+
+English book to Kikuyu audio pipeline using NLLB translation and MLX-compatible TTS.

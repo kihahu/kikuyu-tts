@@ -1,0 +1,22 @@
+{
+  "best_checkpoint": "ckpt_2000",
+  "combined_score": 0.8745,
+  "ranking": [
+    {
+      "checkpoint": "ckpt_2000",
+      "synthesis_success_rate": "0.95",
+      "clipping_rate": "0.04",
+      "mos_lite": "4.1",
+      "wer_proxy": "0.26",
+      "combined_score": 0.8745
+    },
+    {
+      "checkpoint": "ckpt_1000",
+      "synthesis_success_rate": "0.91",
+      "clipping_rate": "0.07",
+      "mos_lite": "3.8",
+      "wer_proxy": "0.31",
+      "combined_score": 0.8275
+    }
+  ]
+}

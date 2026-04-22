@@ -1,0 +1,16 @@
+Spike: mlx_audio.convert with facebook/mms-tts-kik
+
+Command:
+python -m mlx_audio.convert --hf-path facebook/mms-tts-kik --mlx-path models/mms-tts-kik-4bit --quantize --q-bits 4
+
+Result:
+- Failed with parameter mismatch.
+- convert auto-detected model as STT (lasr_ctc).
+- Forcing TTS domain still failed; model type resolved to `spark` and produced 762 unmatched MMS/VITS parameters.
+
+Conclusion:
+- Upstream mlx-audio v0.4.2 does not currently convert MMS-TTS checkpoints out of the box.
+- Project uses a local forked loader in `src/kikuyu_tts/mlx_fork.py`:
+  - keeps normal mlx-audio behavior for supported models
+  - routes MMS-TTS checkpoints through transformers VitsModel backend
+  - exposes `generate()` with save-compatible result objects for pipeline continuity

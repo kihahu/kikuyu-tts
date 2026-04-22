@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Build/test outputs
+.pytest_cache/
+.mypy_cache/
+
+# Local artifacts and scratch outputs
+artifacts/mock_ckpt/
+artifacts/mock_tok/
+artifacts/local_integration/test_bundle/

@@ -1,0 +1,58 @@
+experiment:
+  name: kikuyu_vits_scratch_waxal_colab
+  seed: 42
+
+data:
+  dataset_name: google/WaxalNLP
+  dataset_config: kik_tts
+  prepared_root: data/waxal_kik_tts
+  train_manifest: data/waxal_kik_tts/manifests/train.jsonl
+  dev_manifest: data/waxal_kik_tts/manifests/dev.jsonl
+  test_manifest: data/waxal_kik_tts/manifests/test.jsonl
+  sample_rate: 16000
+  min_duration_sec: 0.6
+  max_duration_sec: 25.0
+
+tokenizer:
+  type: char
+  vocab_path: artifacts/tokenizer_kikuyu_char/vocab.json
+  add_blank_token: true
+
+model:
+  architecture: vits
+  from_scratch: true
+  hidden_size: 192
+  num_hidden_layers: 6
+  num_attention_heads: 2
+  ffn_dim: 768
+  flow_size: 4
+  upsample_rates: [8, 8, 2, 2]
+  upsample_initial_channel: 256
+  segment_size: 8192
+
+training:
+  runner: coqui_tts_vits
+  device: cuda
+  precision: fp16
+  epochs: 150
+  per_device_batch_size: 16
+  grad_accum_steps: 2
+  learning_rate: 0.0002
+  warmup_steps: 1000
+  save_every_steps: 1000
+  eval_every_steps: 1000
+  log_every_steps: 50
+  num_loader_workers: 2
+  max_checkpoints_to_keep: 5
+  gradient_clip_norm: 1.0
+
+checkpointing:
+  local_output_dir: artifacts/colab_runs/kikuyu_vits_scratch
+  drive_output_dir: /content/drive/MyDrive/kikuyu-tts/checkpoints/kikuyu_vits_scratch
+  hf_repo_id: samuelkihahu/kikuyu-vits-scratch
+  push_every_steps: 2000
+
+evaluation:
+  prompts_file: data/eval/kikuyu_prompts.txt
+  sample_out_dir: artifacts/eval_samples
+  summary_csv: artifacts/tts_eval_summary.csv

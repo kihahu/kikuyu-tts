@@ -1,0 +1,42 @@
+experiment:
+  name: mms_tts_kik_finetune
+  seed: 42
+
+data:
+  train_manifest: data/manifests/train.jsonl
+  dev_manifest: data/manifests/dev.jsonl
+  test_manifest: data/manifests/test.jsonl
+  sample_rate: 16000
+  min_duration_sec: 1.0
+  max_duration_sec: 20.0
+  language: kikuyu
+
+model:
+  base_model: facebook/mms-tts-kik
+  tokenizer_model: facebook/mms-tts-kik
+
+training:
+  stage_a:
+    description: scripted_only_stability
+    max_steps: 30000
+    batch_size: 16
+    learning_rate: 0.0001
+  stage_b:
+    description: scripted_plus_spontaneous
+    max_steps: 30000
+    batch_size: 16
+    learning_rate: 0.00005
+    scripted_ratio: 0.7
+    spontaneous_ratio: 0.3
+
+evaluation:
+  fixed_prompt_file: data/eval/kikuyu_prompts.txt
+  metrics:
+    - mos
+    - asr_backtranscription_cer
+    - asr_backtranscription_wer
+
+outputs:
+  checkpoints_dir: artifacts/checkpoints
+  best_model_dir: artifacts/best_model
+  eval_report_csv: artifacts/tts_eval_summary.csv
