@@ -1,42 +1,39 @@
 experiment:
-  name: mms_tts_kik_finetune
+  name: mms_tts_kik_waxal_workflow
   seed: 42
 
 data:
-  train_manifest: data/manifests/train.jsonl
-  dev_manifest: data/manifests/dev.jsonl
-  test_manifest: data/manifests/test.jsonl
+  prepared_root: data/waxal_kik_tts
+  train_manifest: data/waxal_kik_tts/manifests/train_single_speaker.jsonl
+  dev_manifest: data/waxal_kik_tts/manifests/dev_single_speaker.jsonl
+  test_manifest: data/waxal_kik_tts/manifests/test_single_speaker.jsonl
   sample_rate: 16000
-  min_duration_sec: 1.0
-  max_duration_sec: 20.0
   language: kikuyu
 
 model:
   base_model: facebook/mms-tts-kik
   tokenizer_model: facebook/mms-tts-kik
+  base_model_candidates:
+    - facebook/mms-tts-kik
+    - facebook/mms-tts-swh
+    - facebook/mms-tts-kin
+    - facebook/mms-tts-lug
 
 training:
-  stage_a:
-    description: scripted_only_stability
-    max_steps: 30000
-    batch_size: 16
-    learning_rate: 0.0001
-  stage_b:
-    description: scripted_plus_spontaneous
-    max_steps: 30000
-    batch_size: 16
-    learning_rate: 0.00005
-    scripted_ratio: 0.7
-    spontaneous_ratio: 0.3
+  selection_strategy: primary_only
+  target_voice_mode: single_speaker_average
+  learning_rate: 0.00005
+  early_stopping_patience: 3
+  freeze_strategy: none
 
 evaluation:
   fixed_prompt_file: data/eval/kikuyu_prompts.txt
   metrics:
-    - mos
-    - asr_backtranscription_cer
-    - asr_backtranscription_wer
+    - synthesis_success_rate
+    - clipping_rate
+    - subjective_intelligibility
 
 outputs:
-  checkpoints_dir: artifacts/checkpoints
-  best_model_dir: artifacts/best_model
-  eval_report_csv: artifacts/tts_eval_summary.csv
+  export_hf_dir: artifacts/mms_tts_selected_base
+  eval_report_csv: artifacts/mms_tts_candidate_report.csv
+  selection_report_json: artifacts/mms_tts_selection_report.json

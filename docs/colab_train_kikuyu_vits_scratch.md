@@ -1,6 +1,8 @@
-# Colab Workflow: Kikuyu VITS From Scratch (WaxalNLP `kik_tts`)
+# Colab Workflow: Kikuyu VITS From Scratch (Secondary Path)
 
 This runbook matches `notebooks/train_kikuyu_vits_scratch.ipynb` on the default branch.
+
+This is now the secondary training path in the repo. Prefer the MMS-first workflow in `docs/mms_finetune_kikuyu.md` when you want the fastest open-weight Kikuyu-capable baseline that stays aligned with the existing inference stack.
 
 ## 1) Setup runtime and dependencies (Coqui from PyPI)
 
@@ -133,4 +135,3 @@ This creates:
 - tokenizer files
 - evaluation summary copy
 - `integration_metadata.json` for the next local `kikuyu-tts` wiring step
-
