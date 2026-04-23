@@ -85,13 +85,18 @@ def coqui_characters_config(repo_root: Path, tokenizer_cfg: dict[str, Any]) -> d
         raise ValueError(
             f"No graphemes found in {path} (after special tokens). Build vocab with build_kikuyu_vocab.py first."
         )
+    # Coqui prepends each of blank, bos, eos, pad to the main set. If all four
+    # are a single space, you get four duplicate spaces in `vocab` and
+    # AssertionError: {' '}. Use only one leading space (pad); leave the rest
+    # empty so len(...) == 0 and those slots are skipped (see TTS
+    # tts/utils/text/characters.py BaseCharacters._create_vocab).
     return {
         "characters": s,
         "punctuations": "",
         "pad": " ",
-        "eos": " ",
-        "bos": " ",
-        "blank": " ",
+        "eos": "",
+        "bos": "",
+        "blank": "",
         "is_unique": True,
         "is_sorted": True,
     }
