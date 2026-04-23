@@ -1,26 +1,18 @@
 # Colab Workflow: Kikuyu VITS From Scratch (WaxalNLP `kik_tts`)
 
-This runbook executes the full plan in Colab without editing plan files.
+This runbook matches `notebooks/train_kikuyu_vits_scratch.ipynb` on the default branch.
 
-## 1) Setup runtime and dependencies
+## 1) Setup runtime and dependencies (Coqui from PyPI)
 
-```bash
-python --version
-sudo apt-get update
-sudo apt-get install -y python3.11 python3.11-venv
-python3.11 -m venv /content/tts311
-source /content/tts311/bin/activate
-python -m pip install -U pip
-python -m pip install datasets[audio] soundfile librosa pyyaml huggingface_hub
-python -m pip install coqpit trainer TTS==0.22.0
-```
-
-Use the Python 3.11 environment for all subsequent commands:
+The notebook uses the Colab image Python and `coqui-tts` from PyPI (no separate 3.11 venv), then runs repo scripts from a clone of this repository.
 
 ```bash
-source /content/tts311/bin/activate
-python --version  # should be 3.11.x
+pip install -U pip setuptools wheel
+pip install "datasets[audio]" soundfile librosa pyyaml huggingface_hub
+pip install coqui-tts
 ```
+
+**Alternative (older Colab / strict patch pins):** use a Python 3.11 venv, then `pip install coqpit trainer TTS==0.22.0` as in earlier revisions.
 
 If using Drive for checkpoint safety:
 
@@ -33,12 +25,14 @@ drive.mount("/content/drive")
 
 ```bash
 cd /content
-git clone https://github.com/<your-user>/kikuyu-tts.git
+[ -d kikuyu-tts ] || git clone https://github.com/kihahu/kikuyu-tts.git
 cd kikuyu-tts
+git pull
 ```
 
+The prepare step also writes `data/waxal_kik_tts/manifests/train_coqui.txt` and `dev_coqui.txt` for the Coqui `coqui` dataset formatter (see `scripts/colab_train_vits_scratch.py`).
+
 ```bash
-source /content/tts311/bin/activate
 python scripts/prepare_waxal_kik_tts.py \
   --dataset-name google/WaxalNLP \
   --dataset-config kik_tts \
@@ -56,7 +50,6 @@ python scripts/prepare_waxal_kik_tts.py \
 ## 3) Build tokenizer/vocab from normalized manifests
 
 ```bash
-source /content/tts311/bin/activate
 python scripts/build_kikuyu_vocab.py \
   --train-manifest data/waxal_kik_tts/manifests/train.jsonl \
   --dev-manifest data/waxal_kik_tts/manifests/dev.jsonl \
@@ -65,41 +58,34 @@ python scripts/build_kikuyu_vocab.py \
 
 ## 4) Launch training with resume-safe checkpointing
 
-Clone Coqui trainer once per runtime:
+`scripts/colab_train_vits_scratch.py` writes `artifacts/colab_runs/kikuyu_vits_scratch/coqui_vits_config.yaml` and runs training. It uses the Coqui TTS **git** checkout only if `TTS/bin/train_tts.py` exists under `--trainer-repo`; otherwise it uses `python -m TTS.bin.train_tts` (e.g. after `pip install coqui-tts`).
 
-```bash
-cd /content
-git clone https://github.com/coqui-ai/TTS.git
-cd /content/kikuyu-tts
-```
+**Trainer repo** defaults to the kikuyu-tts tree (next to `configs/`). To use a separate clone of [coqui-ai/TTS](https://github.com/coqui-ai/TTS) instead, pass e.g. `--trainer-repo /content/TTS`.
 
 Start fresh:
 
 ```bash
-source /content/tts311/bin/activate
 python scripts/colab_train_vits_scratch.py \
   --config configs/train_kikuyu_vits_scratch_colab.yaml \
-  --trainer-repo /content/TTS
+  --trainer-repo /content/kikuyu-tts
 ```
 
 Resume from Drive checkpoint:
 
 ```bash
-source /content/tts311/bin/activate
 python scripts/colab_train_vits_scratch.py \
   --config configs/train_kikuyu_vits_scratch_colab.yaml \
-  --trainer-repo /content/TTS \
+  --trainer-repo /content/kikuyu-tts \
   --resume
 ```
 
 Optional: push checkpoints to HF Hub:
 
 ```bash
-source /content/tts311/bin/activate
 huggingface-cli login
 python scripts/colab_train_vits_scratch.py \
   --config configs/train_kikuyu_vits_scratch_colab.yaml \
-  --trainer-repo /content/TTS \
+  --trainer-repo /content/kikuyu-tts \
   --resume \
   --push-hf
 ```
@@ -117,7 +103,6 @@ Prepare a CSV (one row per checkpoint) with:
 Then run:
 
 ```bash
-source /content/tts311/bin/activate
 python scripts/evaluate_and_select.py \
   --metrics-csv artifacts/checkpoint_metrics.csv \
   --out-json artifacts/best_checkpoint_selection.json \
@@ -127,7 +112,6 @@ python scripts/evaluate_and_select.py \
 ## 6) Package best checkpoint for local integration
 
 ```bash
-source /content/tts311/bin/activate
 python scripts/prepare_local_integration.py \
   --best-checkpoint-dir artifacts/colab_runs/kikuyu_vits_scratch/checkpoint_best \
   --tokenizer-dir artifacts/tokenizer_kikuyu_char \

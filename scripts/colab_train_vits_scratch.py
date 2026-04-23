@@ -69,8 +69,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--trainer-repo",
-        default="/content/TTS",
-        help="Path to cloned Coqui TTS repository in Colab runtime.",
+        default=None,
+        help="Working directory for the training process. If a Coqui TTS git clone is present "
+        "(TTS/bin/train_tts.py), that script is used; otherwise `python -m TTS.bin.train_tts` "
+        "is used (e.g. after `pip install coqui-tts`). Defaults to the kikuyu-tts repo root "
+        "next to configs/.",
     )
     parser.add_argument("--resume", action="store_true", help="Resume from latest checkpoint found on Drive.")
     parser.add_argument("--push-hf", action="store_true", help="Upload latest run directory to HF Hub.")
@@ -85,6 +88,7 @@ def main() -> None:
     local_output_dir.mkdir(parents=True, exist_ok=True)
 
     repo_root = config_path.parent.parent.resolve()
+    trainer_repo = Path(args.trainer_repo).resolve() if args.trainer_repo else repo_root
     gcn = config["training"]["gradient_clip_norm"]
     grad_clip = gcn if isinstance(gcn, list) else [gcn, gcn]
 
@@ -120,16 +124,24 @@ def main() -> None:
     resolved_coqui_config = local_output_dir / "coqui_vits_config.yaml"
     write_yaml(resolved_coqui_config, coqui_config)
 
-    trainer_repo = Path(args.trainer_repo).resolve()
     if not trainer_repo.exists():
         raise FileNotFoundError(f"Trainer repo not found: {trainer_repo}")
-
-    train_cmd = [
-        sys.executable,
-        "TTS/bin/train_tts.py",
-        "--config_path",
-        str(resolved_coqui_config),
-    ]
+    train_tts_script = trainer_repo / "TTS" / "bin" / "train_tts.py"
+    if train_tts_script.is_file():
+        train_cmd = [
+            sys.executable,
+            str(train_tts_script),
+            "--config_path",
+            str(resolved_coqui_config),
+        ]
+    else:
+        train_cmd = [
+            sys.executable,
+            "-m",
+            "TTS.bin.train_tts",
+            "--config_path",
+            str(resolved_coqui_config),
+        ]
 
     resume_ckpt = None
     if args.resume:
@@ -149,6 +161,7 @@ def main() -> None:
 
     run_report = {
         "config": str(config_path),
+        "trainer_repo": str(trainer_repo),
         "resume_checkpoint": str(resume_ckpt) if resume_ckpt else "",
         "local_output_dir": str(local_output_dir),
         "drive_output_dir": str(drive_output_dir),
