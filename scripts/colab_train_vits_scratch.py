@@ -5,6 +5,7 @@ import argparse
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -83,16 +84,20 @@ def main() -> None:
     drive_output_dir = Path(ckpt_cfg["drive_output_dir"]).resolve()
     local_output_dir.mkdir(parents=True, exist_ok=True)
 
+    repo_root = config_path.parent.parent.resolve()
+    gcn = config["training"]["gradient_clip_norm"]
+    grad_clip = gcn if isinstance(gcn, list) else [gcn, gcn]
+
     coqui_config = {
         "run_name": config["experiment"]["name"],
         "output_path": str(local_output_dir),
         "datasets": [
             {
-                "formatter": "ljspeech",
+                "formatter": "coqui",
                 "dataset_name": "waxal-kikuyu",
-                "meta_file_train": config["data"]["train_manifest"],
-                "meta_file_val": config["data"]["dev_manifest"],
-                "path": ".",
+                "meta_file_train": config["data"]["train_coqui"],
+                "meta_file_val": config["data"]["dev_coqui"],
+                "path": str(repo_root),
                 "language": "kik",
             }
         ],
@@ -107,7 +112,7 @@ def main() -> None:
         "eval_step": config["training"]["eval_every_steps"],
         "mixed_precision": config["training"]["precision"] == "fp16",
         "lr": config["training"]["learning_rate"],
-        "grad_clip": config["training"]["gradient_clip_norm"],
+        "grad_clip": grad_clip,
         "text_cleaner": "phoneme_cleaners",
         "use_phonemes": False,
         "compute_input_seq_cache": True,
@@ -120,7 +125,7 @@ def main() -> None:
         raise FileNotFoundError(f"Trainer repo not found: {trainer_repo}")
 
     train_cmd = [
-        "python",
+        sys.executable,
         "TTS/bin/train_tts.py",
         "--config_path",
         str(resolved_coqui_config),
