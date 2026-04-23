@@ -9,6 +9,9 @@ data:
   train_manifest: data/waxal_kik_tts/manifests/train.jsonl
   dev_manifest: data/waxal_kik_tts/manifests/dev.jsonl
   test_manifest: data/waxal_kik_tts/manifests/test.jsonl
+  # Pipe-delimited Coqui TTS "coqui" formatter (not JSONL) — see prepare_waxal_kik_tts.py
+  train_coqui: data/waxal_kik_tts/manifests/train_coqui.txt
+  dev_coqui: data/waxal_kik_tts/manifests/dev_coqui.txt
   sample_rate: 16000
   min_duration_sec: 0.6
   max_duration_sec: 25.0

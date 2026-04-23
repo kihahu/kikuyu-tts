@@ -122,6 +122,20 @@ def write_stats(path: Path, stats: dict[str, Any]) -> None:
         json.dump(stats, f, indent=2, ensure_ascii=False)
 
 
+def write_coqui_pipe_manifest(path: Path, rows: list[dict[str, Any]], repo_root: Path) -> None:
+    """Coqui TTS 'coqui' formatter: header audio_file|text|speaker_name, paths rel. to repo root."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    root = repo_root.resolve()
+    with path.open("w", encoding="utf-8", newline="") as f:
+        f.write("audio_file|text|speaker_name\n")
+        for row in rows:
+            ap = Path(row["audio_path"]).resolve()
+            rel = ap.relative_to(root)
+            t = str(row["text"]).replace("\n", " ").replace("|", " ")
+            spk = str(row["speaker"])
+            f.write(f"{rel.as_posix()}|{t}|{spk}\n")
+
+
 def write_manifest_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as f:
@@ -240,6 +254,9 @@ def main() -> None:
     write_jsonl(manifests_dir / "train.jsonl", train_rows)
     write_jsonl(manifests_dir / "dev.jsonl", dev_rows)
     write_jsonl(manifests_dir / "test.jsonl", test_rows)
+    repo_root = output_dir.parent.parent
+    write_coqui_pipe_manifest(manifests_dir / "train_coqui.txt", train_rows, repo_root)
+    write_coqui_pipe_manifest(manifests_dir / "dev_coqui.txt", dev_rows, repo_root)
 
     stats = {
         "config": cfg.__dict__,
