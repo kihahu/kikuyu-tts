@@ -41,8 +41,8 @@ def main() -> None:
     parser.add_argument(
         "--wikipedia-orthography",
         action="store_true",
-        help="Union the Kikuyu Latin alphabet from en.wikipedia.org/wiki/Kikuyu_language (Alphabet section), "
-        "per scripts/kikuyu_orthography_wikipedia.py.",
+        help="Union reference graphemes: en.wikipedia.org/wiki/Kikuyu_language (Alphabet) and frozen "
+        "excerpts from www.omniglot.com/writing/kikuyu.htm, per scripts/kikuyu_orthography_wikipedia.py.",
     )
     parser.add_argument(
         "--wikipedia-offline",

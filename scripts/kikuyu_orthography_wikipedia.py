@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Kikuyu (Gĩkũyũ) character inventory aligned with the English Wikipedia
-"Kikuyu language" article, Alphabet section.
+Kikuyu (Gĩkũyũ) reference character inventory from open references:
 
-Source (article may evolve; re-fetch to refresh):
-  https://en.wikipedia.org/wiki/Kikuyu_language
+1) **Wikipedia** — *Kikuyu language*, “Alphabet”
+   https://en.wikipedia.org/wiki/Kikuyu_language
 
-The cited alphabet line in the article is 20 lower-case letters (the Latin
-set minus ``f l p q s v x z``, plus ``ĩ`` and ``ũ``):
+2) **Omniglot** — *Kikuyu* (African reference alphabet; chart also as Excel on site)
+   https://www.omniglot.com/writing/kikuyu.htm
 
-  a b c d e g h i ĩ j k m n o r t u ũ w y
+Wikipedia: the cited alphabet line is 20 lower-case letters (no ``f l p q s v x z``,
+plus ``ĩ`` and ``ũ``): ``a b c d e g h i ĩ j k m n o r t u ũ w y``.
 
-We add uppercase and apostrophe (``'`` and modifier letter ʼ) for well-formed text.
+Omniglot’s HTML is often delivered as a JS challenge to bots, so we **freeze** the
+sample verse and native-name gloss published on the page (see
+``OMNIGLOT_FROZEN_TEXTS``) and union their characters. The on-page alphabet chart
+is an image/Excel; update the frozen lines if the site text changes.
 """
 from __future__ import annotations
 
@@ -26,10 +29,19 @@ import urllib.request
 # Single-space-separated list, same order as the Wikipedia "The Kikuyu alphabet is:" line.
 WIKI_ALPHABET_LINE = "a b c d e g h i ĩ j k m n o r t u ũ w y"
 
-# Characters needed for running text in examples (titles, all-caps) but not
-# listed in the 24-letter line — include so tokenizers do not drop them.
+# Common punctuation / apostrophes in Kikuyu text (Wikipedia + running copy).
 # ng' uses ASCII apostrophe; we also see ’ in some copy (normalize to ' in data).
 KIKUYU_COMMON_SUPPLEMENT = "'ʼ"
+
+# Frozen excerpts from https://www.omniglot.com/writing/kikuyu.htm (as published,
+# “Sample text (John 1:1)” and the native name line). Union with Wikipedia base.
+# Last reviewed: 2026-04 (page “Page last modified: 22.02.24” on site).
+OMNIGLOT_FROZEN_TEXTS: tuple[str, ...] = (
+    # John 1:1 sample
+    "Kĩambĩrĩianĩ Ũhoro aarĩ o kuo, na aatũire harĩ Ngai, nake aarĩ o Ngai.",
+    # “native name for the language is Gĩkũyũ …”
+    "Gĩkũyũ",
+)
 
 
 def _upper_equiv(ch: str) -> str:
@@ -72,14 +84,28 @@ def chars_from_wikipedia_alphabet_line(line: str) -> set[str]:
     return u
 
 
+def chars_from_omniglot_frozen_texts() -> set[str]:
+    """Unique characters in the published Omniglot snippets (punctuation kept)."""
+    s: set[str] = set()
+    for t in OMNIGLOT_FROZEN_TEXTS:
+        s.update(t)
+    return s
+
+
 def wikipedia_orthography_chars(*, use_fetch: bool) -> set[str]:
+    """
+    Base grapheme set: Wikipedia Kikuyu alphabet line (+ fetch if enabled)
+    and frozen Omniglot page excerpts, merged. Uppercase mirrors apply only to
+    the Wikipedia line path (see `chars_from_wikipedia_alphabet_line`); the
+    Omniglot sample already includes mixed case as on the page.
+    """
     base = chars_from_wikipedia_alphabet_line(WIKI_ALPHABET_LINE)
-    if not use_fetch:
-        return base
-    fetched = _fetch_alphabet_line_from_api()
-    if fetched is None:
-        return base
-    return chars_from_wikipedia_alphabet_line(fetched) | base
+    if use_fetch:
+        fetched = _fetch_alphabet_line_from_api()
+        if fetched is not None:
+            base = chars_from_wikipedia_alphabet_line(fetched) | base
+    omni = chars_from_omniglot_frozen_texts()
+    return base | omni
 
 
 WIKI_API = "https://en.wikipedia.org/w/api.php"

@@ -58,7 +58,7 @@ python scripts/build_kikuyu_vocab.py \
   --extra-chars 'ñÑ'
 ```
 
-- **`--wikipedia-orthography`**: add all letters from the [Kikuyu language](https://en.wikipedia.org/wiki/Kikuyu_language) *Alphabet* section (fetched from the live article when online; otherwise the same line is read from a frozen string in `scripts/kikuyu_orthography_wikipedia.py`). Use **`--wikipedia-offline`** in air‑gapped environments to skip network I/O.
+- **`--wikipedia-orthography`**: add reference graphemes from the [Kikuyu language](https://en.wikipedia.org/wiki/Kikuyu_language) *Alphabet* line (fetched when online, else a frozen string) **and** frozen sample text from [Omniglot’s Kikuyu page](https://www.omniglot.com/writing/kikuyu.htm), implemented in `scripts/kikuyu_orthography_wikipedia.py`. Use **`--wikipedia-offline`** in air‑gapped environments to skip Wikipedia network I/O (Omniglot lines stay frozen, no request).
 - **`--extra-chars`**: any extra symbols you still need (e.g. loanword letters not in the wiki line).
 
 `scripts/colab_train_vits_scratch.py` reads `tokenizer.extra_characters` in the YAML and the built `vocab.json` to fill Coqui’s `characters` block.
