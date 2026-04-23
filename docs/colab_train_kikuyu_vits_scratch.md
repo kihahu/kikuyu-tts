@@ -53,8 +53,11 @@ python scripts/prepare_waxal_kik_tts.py \
 python scripts/build_kikuyu_vocab.py \
   --train-manifest data/waxal_kik_tts/manifests/train.jsonl \
   --dev-manifest data/waxal_kik_tts/manifests/dev.jsonl \
-  --out-dir artifacts/tokenizer_kikuyu_char
+  --out-dir artifacts/tokenizer_kikuyu_char \
+  --extra-chars 'ñÑ'
 ```
+
+Adjust `--extra-chars` for any letter you need in the model even if it is rare in the training split. `scripts/colab_train_vits_scratch.py` reads the same set from `tokenizer.extra_characters` in the YAML and writes Coqui’s `characters` block so the runtime does not fall back to ASCII-only graphemes and discard letters like `ñ`.
 
 ## 4) Launch training with resume-safe checkpointing
 

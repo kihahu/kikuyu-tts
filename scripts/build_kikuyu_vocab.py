@@ -26,12 +26,19 @@ def main() -> None:
     parser.add_argument("--train-manifest", required=True)
     parser.add_argument("--dev-manifest", required=True)
     parser.add_argument("--out-dir", default="artifacts/tokenizer_kikuyu_char")
+    parser.add_argument(
+        "--extra-chars",
+        default="",
+        help="Extra characters to always add (e.g. loanwords) even if they never appear in the manifests, e.g. 'ñÑ'.",
+    )
     args = parser.parse_args()
 
     chars = set()
     for manifest in (Path(args.train_manifest), Path(args.dev_manifest)):
         for text in iter_manifest_texts(manifest):
             chars.update(text)
+    for ch in (args.extra_chars or ""):
+        chars.add(ch)
 
     ordered_chars = sorted(chars)
     vocab_tokens = SPECIAL_TOKENS + ordered_chars
