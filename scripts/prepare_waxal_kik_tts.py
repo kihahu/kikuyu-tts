@@ -109,6 +109,42 @@ def speaker_disjoint_split(
     return train_rows, dev_rows, test_rows
 
 
+def row_random_split(
+    rows: list[dict[str, Any]],
+    dev_ratio: float,
+    test_ratio: float,
+    seed: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    if len(rows) < 3:
+        raise ValueError("Need at least 3 rows for train/dev/test split.")
+
+    items = list(rows)
+    rng = random.Random(seed)
+    rng.shuffle(items)
+
+    n_total = len(items)
+    n_test = max(1, int(round(n_total * test_ratio)))
+    n_dev = max(1, int(round(n_total * dev_ratio)))
+    n_train = n_total - n_dev - n_test
+    if n_train < 1:
+        raise ValueError("Split ratios leave no rows for train split. Adjust dev/test ratios.")
+
+    train_rows = items[:n_train]
+    dev_rows = items[n_train : n_train + n_dev]
+    test_rows = items[n_train + n_dev :]
+    if not train_rows or not dev_rows or not test_rows:
+        raise ValueError("Split resulted in an empty subset. Adjust ratios or filters.")
+    return train_rows, dev_rows, test_rows
+
+
+def dominant_speaker_rows(rows: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
+    by_speaker: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        by_speaker[str(row["speaker"])].append(row)
+    speaker, speaker_rows = max(by_speaker.items(), key=lambda item: (len(item[1]), item[0]))
+    return speaker, speaker_rows
+
+
 def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
@@ -258,6 +294,19 @@ def main() -> None:
     write_coqui_pipe_manifest(manifests_dir / "train_coqui.txt", train_rows, repo_root)
     write_coqui_pipe_manifest(manifests_dir / "dev_coqui.txt", dev_rows, repo_root)
 
+    canonical_speaker, canonical_rows = dominant_speaker_rows(rows)
+    canonical_train, canonical_dev, canonical_test = row_random_split(
+        rows=canonical_rows,
+        dev_ratio=cfg.dev_ratio,
+        test_ratio=cfg.test_ratio,
+        seed=cfg.seed,
+    )
+    write_jsonl(manifests_dir / "train_single_speaker.jsonl", canonical_train)
+    write_jsonl(manifests_dir / "dev_single_speaker.jsonl", canonical_dev)
+    write_jsonl(manifests_dir / "test_single_speaker.jsonl", canonical_test)
+    write_coqui_pipe_manifest(manifests_dir / "train_single_speaker_coqui.txt", canonical_train, repo_root)
+    write_coqui_pipe_manifest(manifests_dir / "dev_single_speaker_coqui.txt", canonical_dev, repo_root)
+
     stats = {
         "config": cfg.__dict__,
         "total_rows_after_filter": len(rows),
@@ -267,6 +316,15 @@ def main() -> None:
             "test": len(test_rows),
         },
         "unique_speakers": len({row["speaker"] for row in rows}),
+        "canonical_single_speaker": {
+            "speaker": canonical_speaker,
+            "rows": len(canonical_rows),
+            "split_sizes": {
+                "train": len(canonical_train),
+                "dev": len(canonical_dev),
+                "test": len(canonical_test),
+            },
+        },
         "skip_reasons": dict(skip_reasons),
     }
     write_stats(output_dir / "prep_stats.json", stats)

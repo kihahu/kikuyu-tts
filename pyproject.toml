@@ -13,9 +13,11 @@ dependencies = [
   "transformers>=4.48.0",
   "torch>=2.3.0",
   "accelerate>=0.34.0",
+  "datasets[audio]>=3.0.0",
   "sentencepiece>=0.2.0",
   "safetensors>=0.4.5",
   "numpy>=1.26.0",
+  "pyyaml>=6.0",
   "soundfile>=0.13.1",
 ]
 
