@@ -3,7 +3,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+# Allow "from scripts import ..." and "import kikuyu_orthography_wikipedia" in Colab
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+from kikuyu_orthography_wikipedia import wikipedia_orthography_chars
 
 
 SPECIAL_TOKENS = ["<pad>", "<unk>", "<bos>", "<eos>"]
@@ -31,6 +38,17 @@ def main() -> None:
         default="",
         help="Extra characters to always add (e.g. loanwords) even if they never appear in the manifests, e.g. 'ñÑ'.",
     )
+    parser.add_argument(
+        "--wikipedia-orthography",
+        action="store_true",
+        help="Union the Kikuyu Latin alphabet from en.wikipedia.org/wiki/Kikuyu_language (Alphabet section), "
+        "per scripts/kikuyu_orthography_wikipedia.py.",
+    )
+    parser.add_argument(
+        "--wikipedia-offline",
+        action="store_true",
+        help="With --wikipedia-orthography, do not use the network; use the frozen alphabet line in that module.",
+    )
     args = parser.parse_args()
 
     chars = set()
@@ -39,6 +57,16 @@ def main() -> None:
             chars.update(text)
     for ch in (args.extra_chars or ""):
         chars.add(ch)
+    if args.wikipedia_orthography:
+        fetch = not args.wikipedia_offline
+        wiki = wikipedia_orthography_chars(use_fetch=fetch)
+        n0 = len(chars)
+        chars |= wiki
+        print(
+            f"| wikipedia-orthography: |wiki|={len(wiki)} fetch={fetch} "
+            f"(manifest had {n0} codepoints, merged to {len(chars)})",
+            file=sys.stderr,
+        )
 
     ordered_chars = sorted(chars)
     vocab_tokens = SPECIAL_TOKENS + ordered_chars
