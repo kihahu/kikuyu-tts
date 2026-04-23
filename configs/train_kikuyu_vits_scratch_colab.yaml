@@ -20,6 +20,8 @@ tokenizer:
   type: char
   vocab_path: artifacts/tokenizer_kikuyu_char/vocab.json
   add_blank_token: true
+  # Merged into vocab + Coqui VITS grapheme set (see scripts/build_kikuyu_vocab.py --extra-chars)
+  extra_characters: "ñÑ"
 
 model:
   architecture: vits

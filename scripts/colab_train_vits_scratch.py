@@ -60,6 +60,43 @@ def maybe_push_to_hf(local_output_dir: Path, repo_id: str, message: str) -> None
     run(["huggingface-cli", "upload", repo_id, str(local_output_dir), ".", "--commit-message", message])
 
 
+SPECIAL_VOCAB = frozenset({"<pad>", "<unk>", "<bos>", "<eos>"})
+
+
+def coqui_characters_config(repo_root: Path, tokenizer_cfg: dict[str, Any]) -> dict[str, Any]:
+    """Build Coqui `CharactersConfig` from our vocab.json so TTS does not default to ASCII-only graphemes."""
+    rel = tokenizer_cfg.get("vocab_path", "artifacts/tokenizer_kikuyu_char/vocab.json")
+    extra = (tokenizer_cfg.get("extra_characters") or "").strip()
+    path = (repo_root / rel).resolve()
+    with path.open("r", encoding="utf-8") as f:
+        raw: dict[str, Any] = json.load(f)
+    graphemes: set[str] = set()
+    for key in raw:
+        if key in SPECIAL_VOCAB:
+            continue
+        if len(key) == 1:
+            graphemes.add(key)
+    for ch in extra:
+        graphemes.add(ch)
+    # Coqui appends pad/eos/bos/blank as " " and would duplicate a literal space in `characters`.
+    graphemes.discard(" ")
+    s = "".join(sorted(graphemes))
+    if not s:
+        raise ValueError(
+            f"No graphemes found in {path} (after special tokens). Build vocab with build_kikuyu_vocab.py first."
+        )
+    return {
+        "characters": s,
+        "punctuations": "",
+        "pad": " ",
+        "eos": " ",
+        "bos": " ",
+        "blank": " ",
+        "is_unique": True,
+        "is_sorted": True,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Colab helper to launch and resume Kikuyu VITS-from-scratch training.")
     parser.add_argument(
@@ -92,6 +129,7 @@ def main() -> None:
     gcn = config["training"]["gradient_clip_norm"]
     grad_clip = gcn if isinstance(gcn, list) else [gcn, gcn]
 
+    cc_chars = coqui_characters_config(repo_root, config.get("tokenizer") or {})
     coqui_config = {
         "run_name": config["experiment"]["name"],
         "output_path": str(local_output_dir),
@@ -120,6 +158,7 @@ def main() -> None:
         "text_cleaner": "phoneme_cleaners",
         "use_phonemes": False,
         "compute_input_seq_cache": True,
+        "characters": cc_chars,
     }
     resolved_coqui_config = local_output_dir / "coqui_vits_config.yaml"
     write_yaml(resolved_coqui_config, coqui_config)

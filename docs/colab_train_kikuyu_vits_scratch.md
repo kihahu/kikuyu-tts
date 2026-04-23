@@ -53,8 +53,15 @@ python scripts/prepare_waxal_kik_tts.py \
 python scripts/build_kikuyu_vocab.py \
   --train-manifest data/waxal_kik_tts/manifests/train.jsonl \
   --dev-manifest data/waxal_kik_tts/manifests/dev.jsonl \
-  --out-dir artifacts/tokenizer_kikuyu_char
+  --out-dir artifacts/tokenizer_kikuyu_char \
+  --wikipedia-orthography \
+  --extra-chars 'ñÑ'
 ```
+
+- **`--wikipedia-orthography`**: add reference graphemes from the [Kikuyu language](https://en.wikipedia.org/wiki/Kikuyu_language) *Alphabet* line (fetched when online, else a frozen string) **and** frozen sample text from [Omniglot’s Kikuyu page](https://www.omniglot.com/writing/kikuyu.htm), implemented in `scripts/kikuyu_orthography_wikipedia.py`. Use **`--wikipedia-offline`** in air‑gapped environments to skip Wikipedia network I/O (Omniglot lines stay frozen, no request).
+- **`--extra-chars`**: any extra symbols you still need (e.g. loanword letters not in the wiki line).
+
+`scripts/colab_train_vits_scratch.py` reads `tokenizer.extra_characters` in the YAML and the built `vocab.json` to fill Coqui’s `characters` block.
 
 ## 4) Launch training with resume-safe checkpointing
 
