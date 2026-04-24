@@ -19,6 +19,30 @@ python scripts/prepare_mms_tts_finetune.py \
 
 3. Use the exported Hugging Face-format checkpoint with the existing MMS inference path in `src/kikuyu_tts/mlx_fork.py`.
 
+## MMS Fine-Tune Prep
+
+If you want to fine-tune the actual Kikuyu MMS checkpoint on `Anv-ke/kikuyu`, start with:
+
+```bash
+python scripts/prepare_anv_kikuyu_mms_tts.py \
+  --dataset-name Anv-ke/kikuyu \
+  --output-dir data/anv_kikuyu_mms_tts \
+  --target-sample-rate 16000 \
+  --min-duration-sec 1.0 \
+  --max-duration-sec 15.0
+```
+
+That produces fairseq-style manifests and normalized 16 kHz audio for the full MMS checkpoint route. See `docs/anv_kikuyu_mms_finetune_prep.md`.
+
+To bootstrap the real MMS continuation run after prep:
+
+```bash
+python scripts/bootstrap_anv_kikuyu_mms_finetune.py \
+  --prepared-dir data/anv_kikuyu_mms_tts \
+  --output-dir artifacts/anv_kikuyu_mms_finetune \
+  --download-checkpoint
+```
+
 ## Base Model Ranking
 
 Default shortlist:

@@ -1,0 +1,19 @@
+dataset:
+  name: Anv-ke/kikuyu
+  output_dir: data/anv_kikuyu_mms_tts
+  target_sample_rate: 16000
+  min_duration_sec: 1.0
+  max_duration_sec: 15.0
+  include_unscripted: false
+  speaker_mode: all
+  max_rows_per_split: 0
+
+training_target:
+  base_model: facebook/mms-tts-kik
+  full_checkpoint_url: https://dl.fbaipublicfiles.com/mms/tts/full_model/kik.tar.gz
+  language_code: kik
+
+artifacts:
+  manifests_dir: data/anv_kikuyu_mms_tts/manifests
+  filelists_dir: data/anv_kikuyu_mms_tts/filelists
+  clips_dir: data/anv_kikuyu_mms_tts/clips
