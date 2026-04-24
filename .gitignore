@@ -11,3 +11,4 @@ __pycache__/
 artifacts/mock_ckpt/
 artifacts/mock_tok/
 artifacts/local_integration/test_bundle/
+.gstack/
