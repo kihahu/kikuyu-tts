@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +22,16 @@ DEFAULT_CANDIDATES = [
     "facebook/mms-tts-kin",
     "facebook/mms-tts-lug",
 ]
+
+# In-repo default lives at data/eval/kikuyu_prompts.txt; embedded copy for stale clones (e.g. Colab before git pull).
+_DEFAULT_KIKUYU_BENCHMARK_PROMPTS: tuple[str, ...] = (
+    "Nĩ ndaugire nĩ wega mũno kũmenya ũhoro ũcio.",
+    "Kĩambĩrĩianĩ Ũhoro aarĩ o kuo, na aatũire harĩ Ngai, nake aarĩ o Ngai.",
+    "Mũgĩkũyũ nĩũgĩ kũrĩ andũ a Kenya mweri wa mweri.",
+    "Kũhũgũra gĩkũyũ nĩkĩo kĩa kĩeha mũno kĩa gũcera.",
+    "Nĩ wega tũkĩe na ũgima na ũmwe.",
+    "Gũkũ gũkinyanĩtie kũu kĩrore kĩa rũĩmbi.",
+)
 
 
 def read_yaml(path: Path) -> dict[str, Any]:
@@ -39,6 +51,17 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
 
 
 def load_prompts(path: Path) -> list[str]:
+    if not path.is_file():
+        warnings.warn(
+            f"Prompt file missing ({path}); using embedded default lines. "
+            f"Add data/eval/kikuyu_prompts.txt or run `git pull` in the repo clone.",
+            stacklevel=1,
+        )
+        print(
+            f"Warning: {path} not found; using embedded Kikuyu benchmark prompts.",
+            file=sys.stderr,
+        )
+        return list(_DEFAULT_KIKUYU_BENCHMARK_PROMPTS)
     prompts: list[str] = []
     with path.open("r", encoding="utf-8") as f:
         for line in f:
