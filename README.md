@@ -7,6 +7,19 @@ English-to-Kikuyu translation and speech synthesis pipeline with an MMS-first TT
 - Preferred: MMS base-model selection and export via `configs/finetune_mms_tts_kik.yaml` and `scripts/prepare_mms_tts_finetune.py`
 - Secondary: scratch Coqui VITS training via `scripts/colab_train_vits_scratch.py`
 
+## Current ASR Path
+
+- Preferred: MMS ASR fine-tuning via `configs/train_mms_asr_kik.yaml` and `scripts/train_mms_asr_kik.py`
+
+Run it with:
+
+```bash
+python scripts/train_mms_asr_kik.py \
+  --config configs/train_mms_asr_kik.yaml
+```
+
+This trains `facebook/mms-1b-all` with the Kikuyu adapter `ki` on the paired `audio` + `text` data from `google/WaxalNLP`, config `kik_tts`. See `docs/mms_asr_finetune_kikuyu.md`.
+
 ## Recommended Workflow
 
 1. Prepare Waxal manifests with `scripts/prepare_waxal_kik_tts.py`. This now writes both speaker-disjoint manifests and canonical single-speaker manifests for the dominant Waxal speaker.
