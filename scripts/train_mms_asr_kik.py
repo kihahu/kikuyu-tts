@@ -56,6 +56,7 @@ def resolve_repo_path(repo_root: Path, value: str) -> Path:
 class DataCollatorCTCWithPadding(DataCollatorMixin):
     processor: Any
     padding: str | bool = "longest"
+    return_tensors: str = "pt"
 
     def torch_call(self, features: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
         input_features = [{"input_values": feature["input_values"]} for feature in features]
