@@ -1,6 +1,7 @@
 model:
   name: facebook/mms-1b-all
-  target_lang: ki
+  # ISO 639-3 code in mms-1b-all vocab (there is no "ki" key)
+  target_lang: kik
 
 dataset:
   name: google/WaxalNLP
