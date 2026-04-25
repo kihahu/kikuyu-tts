@@ -18,4 +18,11 @@ fi
 cd "${ROOT}"
 pip install -U pip
 pip install -e .
+
+# mlx-* is pulled in via pyproject for Apple Silicon workflows; on Linux x86_64 HF Jobs the
+# wheels do not ship libmlx.so, and transformers' dtype helpers try `import mlx.core` and crash.
+if [[ "$(uname -s)" == Linux ]]; then
+  pip uninstall -y mlx mlx-audio mlx-lm miniaudio 2>/dev/null || true
+fi
+
 exec python scripts/train_mms_asr_kik.py --config configs/train_mms_asr_kik.yaml

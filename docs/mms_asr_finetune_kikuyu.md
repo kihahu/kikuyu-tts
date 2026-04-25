@@ -40,7 +40,7 @@ The default config:
 
 ## Hugging Face Jobs (GPU)
 
-`datasets[audio]` decodes columns through **torchcodec**, which needs **FFmpeg** on the machine image. Bare `python:3.12` does not ship it, so install FFmpeg before training. Use `scripts/hf_jobs_train_mms_asr_kik.sh` after cloning the repo (script runs `apt-get` when available, then `pip install -e .` and training).
+`datasets[audio]` decodes columns through **torchcodec**, which needs **FFmpeg** on the machine image. Bare `python:3.12` does not ship it, so install FFmpeg before training. Use `scripts/hf_jobs_train_mms_asr_kik.sh` after cloning the repo (script runs `apt-get` when available, then `pip install -e .`, uninstalls Apple-only **MLX** wheels on Linux so `transformers` does not crash on `import mlx.core`, then runs training).
 
 Example (adjust `--flavor`, branch name, and `--detach` as you like):
 
