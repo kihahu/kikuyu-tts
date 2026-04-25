@@ -67,12 +67,12 @@ class DataCollatorCTCWithPadding(DataCollatorMixin):
             padding=self.padding,
             return_tensors="pt",
         )
-        with self.processor.as_target_processor():
-            labels_batch = self.processor.pad(
-                label_features,
-                padding=self.padding,
-                return_tensors="pt",
-            )
+        # as_target_processor() was removed from Wav2Vec2Processor; pad labels with the tokenizer.
+        labels_batch = self.processor.tokenizer.pad(
+            label_features,
+            padding=self.padding,
+            return_tensors="pt",
+        )
 
         labels = labels_batch["input_ids"].masked_fill(labels_batch.attention_mask.ne(1), -100)
         batch["labels"] = labels
