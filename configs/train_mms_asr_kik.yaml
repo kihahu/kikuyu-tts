@@ -31,7 +31,10 @@ training:
   metric_for_best_model: wer
   greater_is_better: false
   gradient_checkpointing: true
-  report_to: none
+  # Hugging Face Trainer integrations: "mlflow", "none", "wandb", or a list.
+  report_to: mlflow
+  # MLflow run title (optional). If null and report_to includes mlflow, the script picks a timestamped name.
+  run_name: null
 
 runtime:
   num_proc: 1

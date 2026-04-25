@@ -21,6 +21,7 @@ dependencies = [
   "numpy>=1.26.0",
   "pyyaml>=6.0",
   "soundfile>=0.13.1",
+  "mlflow>=2.8.0",
 ]
 
 [tool.setuptools]

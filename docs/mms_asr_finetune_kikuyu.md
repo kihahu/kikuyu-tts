@@ -38,6 +38,24 @@ The default config:
 - final processor and model files under `artifacts/mms_asr_kik/`
 - eval metrics via the Hugging Face Trainer save hooks
 
+## MLflow experiment tracking
+
+Training defaults to `report_to: mlflow` in `configs/train_mms_asr_kik.yaml`. The Hugging Face `Trainer` uses the built-in **`MLflowCallback`** (`transformers` integration).
+
+**Local UI:** after a run, `mlflow ui` (defaults to tracking store under `./mlruns` unless you override the URI).
+
+**Common environment variables** (see also [HF `MLflowCallback` docs](https://huggingface.co/docs/transformers/main/en/main_classes/callback#transformers.integrations.MLflowCallback)):
+
+| Variable | Purpose |
+|----------|---------|
+| `MLFLOW_TRACKING_URI` | e.g. `http://127.0.0.1:5000` or `sqlite:///mlflow.db` |
+| `MLFLOW_EXPERIMENT_NAME` | Experiment name (created if missing) |
+| `MLFLOW_TAGS` | JSON object string, e.g. `'{"task":"mms-asr-kik"}'` |
+| `HF_MLFLOW_LOG_ARTIFACTS` | `true` / `1` to log checkpoint folders as artifacts (can be slow) |
+| `DISABLE_MLFLOW_INTEGRATION` | `TRUE` to turn MLflow off without editing YAML |
+
+To **disable** tracking for a one-off run, set `training.report_to: none` in the YAML or export `DISABLE_MLFLOW_INTEGRATION=TRUE`.
+
 ## Hugging Face Jobs (GPU)
 
 `datasets[audio]` decodes columns through **torchcodec**, which needs **FFmpeg** on the machine image. Bare `python:3.12` does not ship it, so install FFmpeg before training. Use `scripts/hf_jobs_train_mms_asr_kik.sh` after cloning the repo (script runs `apt-get` when available, then `pip install -e .`, uninstalls Apple-only **MLX** wheels on Linux so `transformers` does not crash on `import mlx.core`, then runs training).

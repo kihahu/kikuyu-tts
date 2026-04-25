@@ -6,6 +6,7 @@ import json
 import re
 import unicodedata
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,16 @@ def normalize_kikuyu_text(text: str) -> str:
 
 def resolve_repo_path(repo_root: Path, value: str) -> Path:
     return (repo_root / value).resolve()
+
+
+def _reports_to_mlflow(report_to: str | list[str] | None) -> bool:
+    if report_to is None or report_to == "none":
+        return False
+    if isinstance(report_to, str):
+        parts = [p.strip() for p in report_to.split(",")]
+    else:
+        parts = [str(p).strip() for p in report_to]
+    return any(p == "mlflow" for p in parts if p)
 
 
 @dataclass
@@ -251,6 +262,11 @@ def main() -> None:
     with (output_dir / "dataset_summary.json").open("w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, ensure_ascii=False)
 
+    report_to = training_cfg.get("report_to", "none")
+    run_name = training_cfg.get("run_name")
+    if (run_name is None or run_name == "") and _reports_to_mlflow(report_to):
+        run_name = f"mms-asr-kik-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
+
     train_args = TrainingArguments(
         output_dir=str(output_dir),
         per_device_train_batch_size=int(training_cfg["per_device_train_batch_size"]),
@@ -271,7 +287,8 @@ def main() -> None:
         fp16=bool(training_cfg.get("fp16", torch.cuda.is_available())),
         gradient_checkpointing=bool(training_cfg.get("gradient_checkpointing", True)),
         remove_unused_columns=False,
-        report_to=training_cfg.get("report_to", "none"),
+        report_to=report_to,
+        run_name=run_name,
     )
 
     trainer = Trainer(
