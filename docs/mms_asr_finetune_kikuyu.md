@@ -38,6 +38,26 @@ The default config:
 - final processor and model files under `artifacts/mms_asr_kik/`
 - eval metrics via the Hugging Face Trainer save hooks
 
+## After a Hugging Face Job: get the checkpoint locally
+
+HF Jobs do not expose `hf jobs download` in the CLI. The run wrote under **`/workspace/kikuyu-tts/artifacts/mms_asr_kik/`** inside the container. To test on your laptop you need that folder (config + weights + processor files) on disk. Typical options:
+
+1. **Upload from a follow-up job** — short `bash` job: `tar czf /tmp/asr.tgz -C /path/to/artifacts/mms_asr_kik .` then `curl`/paste to a bucket, or `huggingface-cli upload` to a **private** model repo.
+2. **`push_to_hub` in training** (future) — set `TrainingArguments.push_to_hub` + token so the best checkpoint lands on the Hub automatically.
+3. **Any copy path you already use** — e.g. mount an HF bucket volume and `cp` there in the job command.
+
+## Smoke-test inference (local)
+
+With a directory that contains `config.json`, `model.safetensors` (or `pytorch_model.bin`), and tokenizer / preprocessor files:
+
+```bash
+python scripts/infer_mms_asr_kik.py \
+  --model-dir /path/to/artifacts/mms_asr_kik \
+  --audio /path/to/kikuyu_clip.wav
+```
+
+Optional: `--target-lang kik` (default) and `--device cuda` or `cpu`.
+
 ## MLflow experiment tracking
 
 Training defaults to `report_to: mlflow` in `configs/train_mms_asr_kik.yaml`. The Hugging Face `Trainer` uses the built-in **`MLflowCallback`** (`transformers` integration).
