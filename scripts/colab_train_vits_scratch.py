@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -18,11 +19,52 @@ PAD_TOKEN = "<PAD>"
 BOS_TOKEN = "<BOS>"
 EOS_TOKEN = "<EOS>"
 BLANK_TOKEN = "<BLNK>"
+SYNC_INTERVAL_SEC = 120
+RUN_ARTIFACT_FILES = {
+    "config.json",
+    "coqui_vits_config.yaml",
+    "best_model.pth",
+    "run_report.json",
+    "trainer_0_log.txt",
+    "train_tts.py",
+}
+RUN_ARTIFACT_PREFIXES = (
+    "checkpoint_",
+    "best_model_",
+    "events.out.tfevents",
+)
 
 
-def run(command: list[str], cwd: Path | None = None) -> None:
+def run(
+    command: list[str],
+    cwd: Path | None = None,
+    sync_callback: callable | None = None,
+    sync_interval_sec: int = SYNC_INTERVAL_SEC,
+) -> None:
     print(f"+ {' '.join(command)}")
-    subprocess.run(command, cwd=str(cwd) if cwd else None, check=True)
+    if sync_callback is None:
+        subprocess.run(command, cwd=str(cwd) if cwd else None, check=True)
+        return
+
+    proc = subprocess.Popen(command, cwd=str(cwd) if cwd else None)
+    last_sync = 0.0
+    try:
+        while True:
+            ret = proc.poll()
+            now = time.monotonic()
+            if now - last_sync >= sync_interval_sec:
+                sync_callback()
+                last_sync = now
+            if ret is not None:
+                sync_callback()
+                if ret != 0:
+                    raise subprocess.CalledProcessError(ret, command)
+                return
+            time.sleep(5)
+    except KeyboardInterrupt:
+        sync_callback()
+        proc.terminate()
+        raise
 
 
 def read_yaml(path: Path) -> dict[str, Any]:
@@ -36,30 +78,57 @@ def write_yaml(path: Path, data: dict[str, Any]) -> None:
         yaml.safe_dump(data, f, sort_keys=False)
 
 
+def is_run_artifact(path: Path) -> bool:
+    return path.name in RUN_ARTIFACT_FILES or path.name.startswith(RUN_ARTIFACT_PREFIXES)
+
+
+def sync_file(src: Path, dst: Path) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.exists():
+        src_stat = src.stat()
+        dst_stat = dst.stat()
+        if src_stat.st_size == dst_stat.st_size and int(src_stat.st_mtime) <= int(dst_stat.st_mtime):
+            return
+    shutil.copy2(src, dst)
+
+
+def sync_artifacts(src_root: Path, dst_root: Path) -> None:
+    if not src_root.exists():
+        return
+    dst_root.mkdir(parents=True, exist_ok=True)
+    for path in src_root.rglob("*"):
+        if not path.is_file() or not is_run_artifact(path):
+            continue
+        rel = path.relative_to(src_root)
+        sync_file(path, dst_root / rel)
+
+
+def latest_checkpoint(root: Path) -> Path | None:
+    checkpoints = [p for p in root.rglob("checkpoint_*.pth") if p.is_file()]
+    if not checkpoints:
+        return None
+
+    def key(path: Path) -> tuple[int, float, str]:
+        match = re.search(r"checkpoint_(\d+)\.pth$", path.name)
+        step = int(match.group(1)) if match else -1
+        return (step, path.stat().st_mtime, str(path))
+
+    return max(checkpoints, key=key)
+
+
 def merge_resume_checkpoint(local_output_dir: Path, drive_output_dir: Path) -> Path | None:
     if not drive_output_dir.exists():
         return None
-    checkpoints = sorted(drive_output_dir.glob("checkpoint_*"))
-    if not checkpoints:
+    checkpoint = latest_checkpoint(drive_output_dir)
+    if checkpoint is None:
         return None
-    latest = checkpoints[-1]
-    local_target = local_output_dir / latest.name
-    if local_target.exists():
-        return local_target
-    shutil.copytree(latest, local_target)
-    return local_target
+    sync_artifacts(drive_output_dir, local_output_dir)
+    local_checkpoint = local_output_dir / checkpoint.relative_to(drive_output_dir)
+    return local_checkpoint if local_checkpoint.exists() else None
 
 
 def snapshot_to_drive(local_output_dir: Path, drive_output_dir: Path) -> None:
-    if not local_output_dir.exists():
-        return
-    drive_output_dir.mkdir(parents=True, exist_ok=True)
-    checkpoints = sorted(local_output_dir.glob("checkpoint_*"))
-    for checkpoint in checkpoints:
-        target = drive_output_dir / checkpoint.name
-        if target.exists():
-            continue
-        shutil.copytree(checkpoint, target)
+    sync_artifacts(local_output_dir, drive_output_dir)
 
 
 def maybe_push_to_hf(local_output_dir: Path, repo_id: str, message: str) -> None:
@@ -224,6 +293,7 @@ def main() -> None:
     }
     resolved_coqui_config = local_output_dir / "coqui_vits_config.yaml"
     write_yaml(resolved_coqui_config, coqui_config)
+    snapshot_to_drive(local_output_dir, drive_output_dir)
 
     if not trainer_repo.exists():
         raise FileNotFoundError(f"Trainer repo not found: {trainer_repo}")
@@ -250,7 +320,11 @@ def main() -> None:
     if resume_ckpt:
         train_cmd.extend(["--continue_path", str(resume_ckpt)])
 
-    run(train_cmd, cwd=trainer_repo)
+    run(
+        train_cmd,
+        cwd=trainer_repo,
+        sync_callback=lambda: snapshot_to_drive(local_output_dir, drive_output_dir),
+    )
     snapshot_to_drive(local_output_dir, drive_output_dir)
 
     if args.push_hf:
@@ -269,6 +343,7 @@ def main() -> None:
     }
     with (local_output_dir / "run_report.json").open("w", encoding="utf-8") as f:
         json.dump(run_report, f, indent=2)
+    snapshot_to_drive(local_output_dir, drive_output_dir)
     print(json.dumps(run_report, indent=2))
 
 
