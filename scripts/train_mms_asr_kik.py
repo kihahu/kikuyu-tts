@@ -265,8 +265,9 @@ def main() -> None:
     push_to_hub = bool(outputs_cfg.get("push_to_hub", False))
     hub_model_id = outputs_cfg.get("hub_model_id")
     hub_strategy = outputs_cfg.get("hub_strategy", "end")
+    hub_private_repo = outputs_cfg.get("hub_private_repo")
     if push_to_hub and not hub_model_id:
-        raise ValueError("outputs.push_to_hub is true but outputs.hub_model_id is missing (e.g. kihahu/mms-asr-kik-waxal).")
+        raise ValueError("outputs.push_to_hub is true but outputs.hub_model_id is missing (e.g. kihahu/mms-asr-kik-finetuned).")
 
     report_to = training_cfg.get("report_to", "none")
     run_name = training_cfg.get("run_name")
@@ -298,6 +299,7 @@ def main() -> None:
         push_to_hub=push_to_hub,
         hub_model_id=hub_model_id,
         hub_strategy=hub_strategy,
+        hub_private_repo=hub_private_repo,
     )
 
     trainer = Trainer(

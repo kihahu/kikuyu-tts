@@ -42,17 +42,20 @@ The default config:
 
 The **Jobs web page** shows status and **logs**; it does **not** list the container’s filesystem as downloadable “outputs.” The CLI has **no** `hf jobs download`. During training, files lived under **`/workspace/kikuyu-tts/artifacts/mms_asr_kik/`** on the worker; when the job ends, that disk is gone unless you copied it elsewhere.
 
-**Recommended:** turn on Hub upload in `configs/train_mms_asr_kik.yaml`:
+**Recommended:** turn on Hub upload in `configs/train_mms_asr_kik.yaml` (defaults in-repo use `kihahu/mms-asr-kik-finetuned`; change `hub_model_id` if you want a different repo name):
 
 ```yaml
 outputs:
   output_dir: artifacts/mms_asr_kik
   push_to_hub: true
-  hub_model_id: YOUR_USERNAME/mms-asr-kik-waxal   # create empty repo first if needed
+  hub_model_id: YOUR_USERNAME/mms-asr-kik-finetuned
+  hub_private_repo: true
   hub_strategy: end
 ```
 
-Use **`--secrets HF_TOKEN`** on `hf jobs run` (or a write token in env). After the run, open the **model repo** on the Hub and `hf download YOUR_USERNAME/mms-asr-kik-waxal` locally.
+The `Trainer` calls **`create_repo(..., exist_ok=True)`** when `push_to_hub` is enabled, so you do **not** need to create the model repo manually first.
+
+Use **`--secrets HF_TOKEN`** on `hf jobs run` with a token that can **create/write** that model repo. After the run, `hf download YOUR_USERNAME/mms-asr-kik-finetuned` locally.
 
 Other options:
 
