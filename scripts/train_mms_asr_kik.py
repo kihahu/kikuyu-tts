@@ -16,12 +16,12 @@ import yaml
 from datasets import Audio, DatasetDict, concatenate_datasets, load_dataset
 from transformers import (
     AutoProcessor,
-    DataCollatorMixin,
+    Trainer,
     TrainerCallback,
     TrainingArguments,
     Wav2Vec2ForCTC,
-    Trainer,
 )
+from transformers.data.data_collator import DataCollatorMixin
 
 
 MULTISPACE_RE = re.compile(r"\s+")
