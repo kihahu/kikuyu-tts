@@ -41,3 +41,9 @@ runtime:
 
 outputs:
   output_dir: artifacts/mms_asr_kik
+  # HF Jobs do not expose the container disk as "download output". Set push_to_hub true and a hub_model_id
+  # (with HF_TOKEN, e.g. --secrets HF_TOKEN) so the finished checkpoint appears on the Hub.
+  push_to_hub: false
+  hub_model_id: null
+  # "end" = one upload after training (recommended). See TrainingArguments hub_strategy.
+  hub_strategy: end

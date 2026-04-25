@@ -40,11 +40,24 @@ The default config:
 
 ## After a Hugging Face Job: get the checkpoint locally
 
-HF Jobs do not expose `hf jobs download` in the CLI. The run wrote under **`/workspace/kikuyu-tts/artifacts/mms_asr_kik/`** inside the container. To test on your laptop you need that folder (config + weights + processor files) on disk. Typical options:
+The **Jobs web page** shows status and **logs**; it does **not** list the container’s filesystem as downloadable “outputs.” The CLI has **no** `hf jobs download`. During training, files lived under **`/workspace/kikuyu-tts/artifacts/mms_asr_kik/`** on the worker; when the job ends, that disk is gone unless you copied it elsewhere.
 
-1. **Upload from a follow-up job** — short `bash` job: `tar czf /tmp/asr.tgz -C /path/to/artifacts/mms_asr_kik .` then `curl`/paste to a bucket, or `huggingface-cli upload` to a **private** model repo.
-2. **`push_to_hub` in training** (future) — set `TrainingArguments.push_to_hub` + token so the best checkpoint lands on the Hub automatically.
-3. **Any copy path you already use** — e.g. mount an HF bucket volume and `cp` there in the job command.
+**Recommended:** turn on Hub upload in `configs/train_mms_asr_kik.yaml`:
+
+```yaml
+outputs:
+  output_dir: artifacts/mms_asr_kik
+  push_to_hub: true
+  hub_model_id: YOUR_USERNAME/mms-asr-kik-waxal   # create empty repo first if needed
+  hub_strategy: end
+```
+
+Use **`--secrets HF_TOKEN`** on `hf jobs run` (or a write token in env). After the run, open the **model repo** on the Hub and `hf download YOUR_USERNAME/mms-asr-kik-waxal` locally.
+
+Other options:
+
+1. **HF bucket volume** — `-v hf://buckets/org/bucket:/mnt` and `cp -a artifacts/mms_asr_kik /mnt/…`, then `hf sync` to your laptop.
+2. **One-off upload job** — only helps if the worker still exists (not after completion).
 
 ## Smoke-test inference (local)
 

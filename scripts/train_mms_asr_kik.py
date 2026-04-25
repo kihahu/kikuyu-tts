@@ -262,6 +262,12 @@ def main() -> None:
     with (output_dir / "dataset_summary.json").open("w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, ensure_ascii=False)
 
+    push_to_hub = bool(outputs_cfg.get("push_to_hub", False))
+    hub_model_id = outputs_cfg.get("hub_model_id")
+    hub_strategy = outputs_cfg.get("hub_strategy", "end")
+    if push_to_hub and not hub_model_id:
+        raise ValueError("outputs.push_to_hub is true but outputs.hub_model_id is missing (e.g. kihahu/mms-asr-kik-waxal).")
+
     report_to = training_cfg.get("report_to", "none")
     run_name = training_cfg.get("run_name")
     if (run_name is None or run_name == "") and _reports_to_mlflow(report_to):
@@ -289,6 +295,9 @@ def main() -> None:
         remove_unused_columns=False,
         report_to=report_to,
         run_name=run_name,
+        push_to_hub=push_to_hub,
+        hub_model_id=hub_model_id,
+        hub_strategy=hub_strategy,
     )
 
     trainer = Trainer(
