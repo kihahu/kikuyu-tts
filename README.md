@@ -18,7 +18,7 @@ python scripts/train_mms_asr_kik.py \
   --config configs/train_mms_asr_kik.yaml
 ```
 
-This trains `facebook/mms-1b-all` with the Kikuyu adapter `ki` on the paired `audio` + `text` data from `google/WaxalNLP`, config `kik_tts`. See `docs/mms_asr_finetune_kikuyu.md`.
+This trains `facebook/mms-1b-all` with the Kikuyu MMS head (`kik`) on the paired `audio` + `text` data from `google/WaxalNLP`, config `kik_tts`. Metrics and hyperparameters are logged to **MLflow** by default (`report_to: mlflow`); see `docs/mms_asr_finetune_kikuyu.md`.
 
 ## Recommended Workflow
 
