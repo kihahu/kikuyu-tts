@@ -4,6 +4,13 @@
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
+export HF_HUB_ETAG_TIMEOUT="${HF_HUB_ETAG_TIMEOUT:-30}"
+export HF_HUB_DOWNLOAD_TIMEOUT="${HF_HUB_DOWNLOAD_TIMEOUT:-60}"
+
+if [[ -z "${HF_TOKEN:-}" ]]; then
+  echo "HF_TOKEN is required. Pass a write-capable token with: hf jobs run ... --secrets HF_TOKEN" >&2
+  exit 2
+fi
 
 if command -v apt-get >/dev/null 2>&1; then
   apt-get update
@@ -16,6 +23,18 @@ if [[ -z "${ROOT}" ]]; then
 fi
 
 cd "${ROOT}"
+echo "Repo root: ${ROOT}"
+if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "Git branch: $(git rev-parse --abbrev-ref HEAD)"
+  echo "Git commit: $(git rev-parse HEAD)"
+fi
+echo "Config path: configs/train_mms_asr_kik.yaml"
+awk '
+  /^outputs:/ { in_outputs = 1; next }
+  /^[^[:space:]]/ { in_outputs = 0 }
+  in_outputs && /hub_model_id|output_dir|push_to_hub|hub_upload_checkpoints|hub_verify_after_push/ { print }
+' configs/train_mms_asr_kik.yaml
+
 pip install -U pip
 pip install -e .
 

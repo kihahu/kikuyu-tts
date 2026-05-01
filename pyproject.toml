@@ -15,6 +15,7 @@ dependencies = [
   "accelerate>=0.34.0",
   "datasets[audio]>=3.0.0",
   "evaluate>=0.4.3",
+  "huggingface_hub>=0.24.0",
   "jiwer>=3.0.5",
   "sentencepiece>=0.2.0",
   "safetensors>=0.4.5",

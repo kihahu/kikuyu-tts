@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import tempfile
 import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +18,7 @@ import numpy as np
 import torch
 import yaml
 from datasets import Audio, DatasetDict, concatenate_datasets, load_dataset
+from huggingface_hub import HfApi, hf_hub_download
 from transformers import (
     AutoProcessor,
     Trainer,
@@ -34,6 +38,17 @@ PUNCT_REPLACEMENTS = {
     "\u2013": "-",
     "\u2014": "-",
 }
+DEFAULT_HUB_REQUIRED_FILES = [
+    "config.json",
+    "model.safetensors",
+    "tokenizer_config.json",
+    "preprocessor_config.json",
+    "vocab.json",
+    "trainer_state.json",
+    "eval_results.json",
+    "dataset_summary.json",
+]
+FINAL_UPLOAD_IGNORE_PATTERNS = ["checkpoint-*", "checkpoint-*/*"]
 
 
 def read_yaml(path: Path) -> dict[str, Any]:
@@ -61,6 +76,146 @@ def _reports_to_mlflow(report_to: str | list[str] | None) -> bool:
     else:
         parts = [str(p).strip() for p in report_to]
     return any(p == "mlflow" for p in parts if p)
+
+
+def _require_hf_token() -> str:
+    token = os.environ.get("HF_TOKEN", "").strip()
+    if not token:
+        raise RuntimeError(
+            "outputs.push_to_hub is true, but HF_TOKEN is not set. "
+            "Pass a write-capable token to HF Jobs with `--secrets HF_TOKEN`."
+        )
+    return token
+
+
+def _commit_oid(commit_info: Any) -> str | None:
+    return getattr(commit_info, "oid", None) or getattr(commit_info, "commit_oid", None)
+
+
+def _matching_required_files(repo_files: list[str], required: list[str]) -> tuple[list[str], list[str]]:
+    present: list[str] = []
+    missing: list[str] = []
+    for pattern in required:
+        matches = [path for path in repo_files if path == pattern or fnmatch(path, pattern)]
+        if matches:
+            present.append(pattern)
+        else:
+            missing.append(pattern)
+    return present, missing
+
+
+def preflight_hub_repo(
+    api: HfApi,
+    repo_id: str,
+    private: bool | None,
+    token: str,
+) -> None:
+    timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    sentinel_path = f".publish_preflight/{timestamp}.json"
+    payload = {
+        "repo_id": repo_id,
+        "created_at": datetime.now(UTC).isoformat(),
+        "purpose": "kikuyu-tts MMS ASR publish preflight",
+    }
+
+    try:
+        api.whoami(token=token)
+        api.create_repo(
+            repo_id=repo_id,
+            private=private,
+            repo_type="model",
+            exist_ok=True,
+            token=token,
+        )
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as f:
+            json.dump(payload, f, indent=2)
+            temp_path = f.name
+        try:
+            api.upload_file(
+                path_or_fileobj=temp_path,
+                path_in_repo=sentinel_path,
+                repo_id=repo_id,
+                repo_type="model",
+                token=token,
+                commit_message="publish preflight",
+            )
+        finally:
+            Path(temp_path).unlink(missing_ok=True)
+
+        downloaded = hf_hub_download(
+            repo_id=repo_id,
+            filename=sentinel_path,
+            repo_type="model",
+            token=token,
+        )
+        with Path(downloaded).open("r", encoding="utf-8") as f:
+            downloaded_payload = json.load(f)
+        if downloaded_payload.get("repo_id") != repo_id:
+            raise RuntimeError(f"Preflight sentinel readback mismatch for {repo_id}.")
+    except Exception as exc:
+        raise RuntimeError(
+            "Hugging Face Hub preflight failed before training. "
+            f"Verify HF_TOKEN can create/write the model repo '{repo_id}'. "
+            f"Original error: {exc}"
+        ) from exc
+
+
+def upload_folder_to_hub(
+    api: HfApi,
+    folder_path: Path,
+    repo_id: str,
+    token: str,
+    commit_message: str,
+    path_in_repo: str | None = None,
+    ignore_patterns: list[str] | None = None,
+) -> Any:
+    try:
+        return api.upload_folder(
+            folder_path=folder_path,
+            path_in_repo=path_in_repo,
+            repo_id=repo_id,
+            repo_type="model",
+            token=token,
+            commit_message=commit_message,
+            ignore_patterns=ignore_patterns,
+        )
+    except Exception as exc:
+        target = f"{repo_id}/{path_in_repo}" if path_in_repo else repo_id
+        raise RuntimeError(f"Failed to upload {folder_path} to Hub target {target}: {exc}") from exc
+
+
+def verify_hub_model(
+    repo_id: str,
+    token: str,
+    required_files: list[str],
+    target_lang: str,
+) -> dict[str, Any]:
+    api = HfApi()
+    repo_files = api.list_repo_files(repo_id=repo_id, repo_type="model", token=token)
+    present, missing = _matching_required_files(repo_files, required_files)
+    if missing:
+        raise RuntimeError(
+            f"Hub repo {repo_id} is missing required files after publish: {', '.join(missing)}"
+        )
+
+    for filename in required_files:
+        if "*" not in filename:
+            hf_hub_download(repo_id=repo_id, filename=filename, repo_type="model", token=token)
+
+    AutoProcessor.from_pretrained(repo_id, target_lang=target_lang, token=token)
+    Wav2Vec2ForCTC.from_pretrained(repo_id, token=token)
+    return {
+        "repo_id": repo_id,
+        "required_files_present": present,
+        "file_count": len(repo_files),
+    }
+
+
+def write_publish_report(output_dir: Path, report: dict[str, Any]) -> Path:
+    path = output_dir / "publish_report.json"
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    return path
 
 
 @dataclass
@@ -101,6 +256,41 @@ class SaveProcessorCallback(TrainerCallback):
 
     def on_train_end(self, args, state, control, **kwargs):
         self.processor.save_pretrained(args.output_dir)
+        return control
+
+
+class HubCheckpointUploadCallback(TrainerCallback):
+    def __init__(
+        self,
+        api: HfApi,
+        repo_id: str,
+        token: str,
+        processor: Any,
+        upload_every_n_saves: int,
+    ) -> None:
+        self.api = api
+        self.repo_id = repo_id
+        self.token = token
+        self.processor = processor
+        self.upload_every_n_saves = max(1, upload_every_n_saves)
+        self.save_count = 0
+
+    def on_save(self, args, state, control, **kwargs):
+        self.save_count += 1
+        if self.save_count % self.upload_every_n_saves != 0:
+            return control
+        checkpoint_dir = Path(args.output_dir) / f"checkpoint-{state.global_step}"
+        if not checkpoint_dir.is_dir():
+            raise RuntimeError(f"Expected checkpoint directory is missing: {checkpoint_dir}")
+        self.processor.save_pretrained(checkpoint_dir)
+        upload_folder_to_hub(
+            api=self.api,
+            folder_path=checkpoint_dir,
+            path_in_repo=checkpoint_dir.name,
+            repo_id=self.repo_id,
+            token=self.token,
+            commit_message=f"checkpoint step {state.global_step}",
+        )
         return control
 
 
@@ -226,6 +416,30 @@ def main() -> None:
     runtime_cfg = config.get("runtime", {})
     outputs_cfg = config["outputs"]
 
+    push_to_hub = bool(outputs_cfg.get("push_to_hub", False))
+    hub_model_id = outputs_cfg.get("hub_model_id")
+    hub_strategy = outputs_cfg.get("hub_strategy", "end")
+    hub_private_repo = outputs_cfg.get("hub_private_repo")
+    hub_verify_after_push = bool(outputs_cfg.get("hub_verify_after_push", push_to_hub))
+    hub_upload_checkpoints = bool(outputs_cfg.get("hub_upload_checkpoints", push_to_hub))
+    hub_upload_every_n_saves = int(outputs_cfg.get("hub_upload_every_n_saves", 1))
+    hub_required_files = list(outputs_cfg.get("hub_required_files") or DEFAULT_HUB_REQUIRED_FILES)
+    hub_token = _require_hf_token() if push_to_hub else ""
+    hub_api = HfApi() if push_to_hub else None
+    if push_to_hub and not hub_model_id:
+        raise ValueError(
+            "outputs.push_to_hub is true but outputs.hub_model_id is missing "
+            "(e.g. kihahu/mms-asr-kik-finetuned)."
+        )
+    if push_to_hub:
+        assert hub_api is not None
+        preflight_hub_repo(
+            api=hub_api,
+            repo_id=hub_model_id,
+            private=hub_private_repo,
+            token=hub_token,
+        )
+
     processor = AutoProcessor.from_pretrained(
         model_cfg["name"],
         target_lang=model_cfg["target_lang"],
@@ -261,13 +475,6 @@ def main() -> None:
     summary["dataset_config"] = config["dataset"]["config"]
     with (output_dir / "dataset_summary.json").open("w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, ensure_ascii=False)
-
-    push_to_hub = bool(outputs_cfg.get("push_to_hub", False))
-    hub_model_id = outputs_cfg.get("hub_model_id")
-    hub_strategy = outputs_cfg.get("hub_strategy", "end")
-    hub_private_repo = outputs_cfg.get("hub_private_repo")
-    if push_to_hub and not hub_model_id:
-        raise ValueError("outputs.push_to_hub is true but outputs.hub_model_id is missing (e.g. kihahu/mms-asr-kik-finetuned).")
 
     report_to = training_cfg.get("report_to", "none")
     run_name = training_cfg.get("run_name")
@@ -312,6 +519,17 @@ def main() -> None:
         compute_metrics=build_compute_metrics(processor),
         callbacks=[SaveProcessorCallback(processor)],
     )
+    if push_to_hub and hub_upload_checkpoints:
+        assert hub_api is not None
+        trainer.add_callback(
+            HubCheckpointUploadCallback(
+                api=hub_api,
+                repo_id=hub_model_id,
+                token=hub_token,
+                processor=processor,
+                upload_every_n_saves=hub_upload_every_n_saves,
+            )
+        )
 
     trainer.train(resume_from_checkpoint=training_cfg.get("resume_from_checkpoint"))
     trainer.save_model(str(output_dir))
@@ -320,6 +538,63 @@ def main() -> None:
     trainer.log_metrics("eval", metrics)
     trainer.save_metrics("eval", metrics)
     trainer.save_state()
+
+    if push_to_hub:
+        assert hub_api is not None
+        final_commit = None
+        report: dict[str, Any] = {
+            "status": "started",
+            "repo_id": hub_model_id,
+            "target_lang": model_cfg["target_lang"],
+            "output_dir": str(output_dir),
+            "global_step": int(trainer.state.global_step),
+            "metrics": metrics,
+            "required_files": hub_required_files,
+            "created_at": datetime.now(UTC).isoformat(),
+        }
+        try:
+            final_commit = upload_folder_to_hub(
+                api=hub_api,
+                folder_path=output_dir,
+                repo_id=hub_model_id,
+                token=hub_token,
+                commit_message=f"final model step {trainer.state.global_step}",
+                ignore_patterns=FINAL_UPLOAD_IGNORE_PATTERNS,
+            )
+            report["final_commit_oid"] = _commit_oid(final_commit)
+            if hub_verify_after_push:
+                report["verification"] = verify_hub_model(
+                    repo_id=hub_model_id,
+                    token=hub_token,
+                    required_files=hub_required_files,
+                    target_lang=model_cfg["target_lang"],
+                )
+            report["status"] = "success"
+            write_publish_report(output_dir, report)
+            hub_api.upload_file(
+                path_or_fileobj=output_dir / "publish_report.json",
+                path_in_repo="publish_report.json",
+                repo_id=hub_model_id,
+                repo_type="model",
+                token=hub_token,
+                commit_message=f"publish report step {trainer.state.global_step}",
+            )
+        except Exception as exc:
+            report["status"] = "failed"
+            report["error"] = str(exc)
+            write_publish_report(output_dir, report)
+            try:
+                hub_api.upload_file(
+                    path_or_fileobj=output_dir / "publish_report.json",
+                    path_in_repo="publish_report.json",
+                    repo_id=hub_model_id,
+                    repo_type="model",
+                    token=hub_token,
+                    commit_message=f"failed publish report step {trainer.state.global_step}",
+                )
+            except Exception:
+                pass
+            raise
 
 
 if __name__ == "__main__":

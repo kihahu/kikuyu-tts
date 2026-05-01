@@ -4,8 +4,10 @@ model:
   target_lang: kik
 
 dataset:
-  name: google/WaxalNLP
-  config: kik_tts
+  # Merged dataset containing Waxal + GRN-style data.
+  # Replace with your actual dataset repo/config if different.
+  name: kihahu/kikuyu_asr_multisource
+  config: default
   text_column: text
   train_splits:
     - train
@@ -18,7 +20,8 @@ training:
   per_device_train_batch_size: 4
   per_device_eval_batch_size: 4
   gradient_accumulation_steps: 4
-  learning_rate: 3.0e-5
+  # Continued fine-tuning on mixed data; use a lower LR to reduce forgetting.
+  learning_rate: 1.0e-5
   warmup_steps: 100
   max_steps: 1500
   eval_strategy: steps
@@ -31,8 +34,8 @@ training:
   metric_for_best_model: wer
   greater_is_better: false
   gradient_checkpointing: true
-  # Hugging Face Trainer integrations: "mlflow", "none", "wandb", or a list.
-  report_to: mlflow
+  # HF Jobs runs are simpler without external tracking infra.
+  report_to: none
   # MLflow run title (optional). If null and report_to includes mlflow, the script picks a timestamped name.
   run_name: null
 
@@ -43,7 +46,21 @@ outputs:
   output_dir: artifacts/mms_asr_kik
   # Sync checkpoint to the Hub (Trainer calls create_repo(..., exist_ok=True) on startup when push_to_hub is true).
   push_to_hub: true
-  hub_model_id: kihahu/mms-asr-kik-finetuned
+  # Use a new model ID so baseline checkpoint remains intact.
+  hub_model_id: kihahu/mms-asr-kik-finetuned-multisource
   hub_private_repo: true
   # "end" = one upload after training (recommended). See TrainingArguments hub_strategy.
   hub_strategy: end
+  # Extra safeguards: fail fast before training, upload each saved checkpoint, and verify final Hub load.
+  hub_verify_after_push: true
+  hub_upload_checkpoints: true
+  hub_upload_every_n_saves: 1
+  hub_required_files:
+    - config.json
+    - model.safetensors
+    - tokenizer_config.json
+    - preprocessor_config.json
+    - vocab.json
+    - trainer_state.json
+    - eval_results.json
+    - dataset_summary.json
