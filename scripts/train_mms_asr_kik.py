@@ -4,9 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import tempfile
-import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from fnmatch import fnmatch
@@ -28,16 +26,8 @@ from transformers import (
 )
 from transformers.data.data_collator import DataCollatorMixin
 
+from normalize_kikuyu import normalize_kikuyu_text
 
-MULTISPACE_RE = re.compile(r"\s+")
-PUNCT_REPLACEMENTS = {
-    "\u2018": "'",
-    "\u2019": "'",
-    "\u201c": '"',
-    "\u201d": '"',
-    "\u2013": "-",
-    "\u2014": "-",
-}
 DEFAULT_HUB_REQUIRED_FILES = [
     "config.json",
     "model.safetensors",
@@ -54,14 +44,6 @@ FINAL_UPLOAD_IGNORE_PATTERNS = ["checkpoint-*", "checkpoint-*/*"]
 def read_yaml(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f)
-
-
-def normalize_kikuyu_text(text: str) -> str:
-    text = unicodedata.normalize("NFKC", text or "")
-    for src, dst in PUNCT_REPLACEMENTS.items():
-        text = text.replace(src, dst)
-    text = text.lower().strip()
-    return MULTISPACE_RE.sub(" ", text)
 
 
 def resolve_repo_path(repo_root: Path, value: str) -> Path:

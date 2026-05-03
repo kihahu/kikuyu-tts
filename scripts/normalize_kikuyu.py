@@ -7,16 +7,45 @@ import unicodedata
 
 
 MULTISPACE_RE = re.compile(r"\s+")
+KIKUYU_MMS_LABEL_CHARS = set(" '-0124abcdefghijklmnopqrstuvwyzĩũʼ")
+ORTHOGRAPHY_TRANSLATION = str.maketrans(
+    {
+        "ì": "ĩ",
+        "í": "ĩ",
+        "î": "ĩ",
+        "ī": "ĩ",
+        "Ì": "ĩ",
+        "Í": "ĩ",
+        "Î": "ĩ",
+        "Ī": "ĩ",
+        "ù": "ũ",
+        "ú": "ũ",
+        "û": "ũ",
+        "ū": "ũ",
+        "Ù": "ũ",
+        "Ú": "ũ",
+        "Û": "ũ",
+        "Ū": "ũ",
+    }
+)
+PUNCT_REPLACEMENTS = {
+    "\u2018": "'",
+    "\u2019": "'",
+    "\u201c": " ",
+    "\u201d": " ",
+    "\u2013": "-",
+    "\u2014": "-",
+    "_": " ",
+}
 
 
 def normalize_kikuyu_text(text: str) -> str:
-    text = unicodedata.normalize("NFKC", text)
-    text = text.replace("\u2018", "'").replace("\u2019", "'")
-    text = text.replace("\u201c", '"').replace("\u201d", '"')
-    text = text.replace("\u2013", "-").replace("\u2014", "-")
-    text = text.lower().strip()
-    text = MULTISPACE_RE.sub(" ", text)
-    return text
+    text = unicodedata.normalize("NFKC", text or "")
+    for src, dst in PUNCT_REPLACEMENTS.items():
+        text = text.replace(src, dst)
+    text = text.translate(ORTHOGRAPHY_TRANSLATION).lower()
+    text = "".join(char if char in KIKUYU_MMS_LABEL_CHARS else " " for char in text)
+    return MULTISPACE_RE.sub(" ", text).strip()
 
 
 def main() -> None:
