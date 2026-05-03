@@ -4,10 +4,9 @@ model:
   target_lang: kik
 
 dataset:
-  # Merged dataset containing Waxal + GRN-style data.
-  # Replace with your actual dataset repo/config if different.
-  name: kihahu/kikuyu_asr_multisource
-  config: default
+  # Public Waxal Kikuyu TTS split exposes paired audio + text usable for ASR fine-tuning.
+  name: google/WaxalNLP
+  config: kik_tts
   text_column: text
   train_splits:
     - train
@@ -20,7 +19,6 @@ training:
   per_device_train_batch_size: 4
   per_device_eval_batch_size: 4
   gradient_accumulation_steps: 4
-  # Continued fine-tuning on mixed data; use a lower LR to reduce forgetting.
   learning_rate: 1.0e-5
   warmup_steps: 100
   max_steps: 1500
