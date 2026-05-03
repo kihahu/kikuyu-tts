@@ -91,6 +91,7 @@ def preflight_hub_repo(
     repo_id: str,
     private: bool | None,
     token: str,
+    create_pr: bool,
 ) -> None:
     timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     sentinel_path = f".publish_preflight/{timestamp}.json"
@@ -120,9 +121,13 @@ def preflight_hub_repo(
                 repo_type="model",
                 token=token,
                 commit_message="publish preflight",
+                create_pr=create_pr,
             )
         finally:
             Path(temp_path).unlink(missing_ok=True)
+
+        if create_pr:
+            return
 
         downloaded = hf_hub_download(
             repo_id=repo_id,
@@ -150,6 +155,7 @@ def upload_folder_to_hub(
     commit_message: str,
     path_in_repo: str | None = None,
     ignore_patterns: list[str] | None = None,
+    create_pr: bool = False,
 ) -> Any:
     try:
         return api.upload_folder(
@@ -160,6 +166,7 @@ def upload_folder_to_hub(
             token=token,
             commit_message=commit_message,
             ignore_patterns=ignore_patterns,
+            create_pr=create_pr,
         )
     except Exception as exc:
         target = f"{repo_id}/{path_in_repo}" if path_in_repo else repo_id
@@ -249,12 +256,14 @@ class HubCheckpointUploadCallback(TrainerCallback):
         token: str,
         processor: Any,
         upload_every_n_saves: int,
+        create_pr: bool,
     ) -> None:
         self.api = api
         self.repo_id = repo_id
         self.token = token
         self.processor = processor
         self.upload_every_n_saves = max(1, upload_every_n_saves)
+        self.create_pr = create_pr
         self.save_count = 0
 
     def on_save(self, args, state, control, **kwargs):
@@ -272,6 +281,7 @@ class HubCheckpointUploadCallback(TrainerCallback):
             repo_id=self.repo_id,
             token=self.token,
             commit_message=f"checkpoint step {state.global_step}",
+            create_pr=self.create_pr,
         )
         return control
 
@@ -402,6 +412,7 @@ def main() -> None:
     hub_model_id = outputs_cfg.get("hub_model_id")
     hub_strategy = outputs_cfg.get("hub_strategy", "end")
     hub_private_repo = outputs_cfg.get("hub_private_repo")
+    hub_create_pr = bool(outputs_cfg.get("hub_create_pr", False))
     hub_verify_after_push = bool(outputs_cfg.get("hub_verify_after_push", push_to_hub))
     hub_upload_checkpoints = bool(outputs_cfg.get("hub_upload_checkpoints", push_to_hub))
     hub_upload_every_n_saves = int(outputs_cfg.get("hub_upload_every_n_saves", 1))
@@ -420,6 +431,7 @@ def main() -> None:
             repo_id=hub_model_id,
             private=hub_private_repo,
             token=hub_token,
+            create_pr=hub_create_pr,
         )
 
     processor = AutoProcessor.from_pretrained(
@@ -485,7 +497,7 @@ def main() -> None:
         remove_unused_columns=False,
         report_to=report_to,
         run_name=run_name,
-        push_to_hub=push_to_hub,
+        push_to_hub=push_to_hub and not hub_create_pr,
         hub_model_id=hub_model_id,
         hub_strategy=hub_strategy,
         hub_private_repo=hub_private_repo,
@@ -510,6 +522,7 @@ def main() -> None:
                 token=hub_token,
                 processor=processor,
                 upload_every_n_saves=hub_upload_every_n_saves,
+                create_pr=hub_create_pr,
             )
         )
 
@@ -532,6 +545,7 @@ def main() -> None:
             "global_step": int(trainer.state.global_step),
             "metrics": metrics,
             "required_files": hub_required_files,
+            "hub_create_pr": hub_create_pr,
             "created_at": datetime.now(UTC).isoformat(),
         }
         try:
@@ -542,9 +556,10 @@ def main() -> None:
                 token=hub_token,
                 commit_message=f"final model step {trainer.state.global_step}",
                 ignore_patterns=FINAL_UPLOAD_IGNORE_PATTERNS,
+                create_pr=hub_create_pr,
             )
             report["final_commit_oid"] = _commit_oid(final_commit)
-            if hub_verify_after_push:
+            if hub_verify_after_push and not hub_create_pr:
                 report["verification"] = verify_hub_model(
                     repo_id=hub_model_id,
                     token=hub_token,
@@ -560,6 +575,7 @@ def main() -> None:
                 repo_type="model",
                 token=hub_token,
                 commit_message=f"publish report step {trainer.state.global_step}",
+                create_pr=hub_create_pr,
             )
         except Exception as exc:
             report["status"] = "failed"
@@ -573,6 +589,7 @@ def main() -> None:
                     repo_type="model",
                     token=hub_token,
                     commit_message=f"failed publish report step {trainer.state.global_step}",
+                    create_pr=hub_create_pr,
                 )
             except Exception:
                 pass

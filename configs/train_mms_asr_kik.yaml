@@ -47,6 +47,8 @@ outputs:
   # Use a new model ID so baseline checkpoint remains intact.
   hub_model_id: kihahu/mms-asr-kik-finetuned-multisource
   hub_private_repo: true
+  # Use Hub PR uploads when the token cannot commit directly to the protected model repo.
+  hub_create_pr: true
   # "end" = one upload after training (recommended). See TrainingArguments hub_strategy.
   hub_strategy: end
   # Extra safeguards: fail fast before training, upload each saved checkpoint, and verify final Hub load.
