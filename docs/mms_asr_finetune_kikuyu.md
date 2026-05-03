@@ -26,7 +26,7 @@ The default config:
 
 - loads `facebook/mms-1b-all`
 - sets `target_lang: kik`
-- trains on `kihahu/kikuyu_asr_multisource`, config `default`
+- trains on `google/WaxalNLP`, config `kik_tts`
 - combines `train + validation` for training
 - evaluates on `test`
 - filters clips outside `0.5s` to `30s`
