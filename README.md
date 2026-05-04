@@ -4,7 +4,8 @@ English-to-Kikuyu translation and speech synthesis pipeline with an MMS-first TT
 
 ## Current TTS Paths
 
-- Preferred: MMS base-model selection and export via `configs/finetune_mms_tts_kik.yaml` and `scripts/prepare_mms_tts_finetune.py`
+- Preferred: MMS full-checkpoint continuation on Waxal via `configs/train_mms_tts_kik_waxal.yaml` and `scripts/bootstrap_mms_kikuyu_tts_finetune.py`
+- Baseline: MMS base-model selection and export via `configs/finetune_mms_tts_kik.yaml` and `scripts/prepare_mms_tts_finetune.py`
 - Secondary: scratch Coqui VITS training via `scripts/colab_train_vits_scratch.py`
 
 ## Current ASR Path
@@ -22,15 +23,46 @@ This trains `facebook/mms-1b-all` with the Kikuyu MMS head (`kik`) on the paired
 
 ## Recommended Workflow
 
-1. Prepare Waxal manifests with `scripts/prepare_waxal_kik_tts.py`. This now writes both speaker-disjoint manifests and canonical single-speaker manifests for the dominant Waxal speaker.
-2. Run the MMS workflow script to validate, benchmark, rank, and export a selected open-weight base:
+1. Prepare Waxal manifests with `scripts/prepare_waxal_kik_tts.py`. This writes JSONL, fairseq-style bundles, and VITS filelists for both all-speaker and dominant single-speaker training.
+2. For a real MMS fine-tune, bootstrap the full-checkpoint continuation run:
+
+```bash
+python scripts/bootstrap_mms_kikuyu_tts_finetune.py \
+  --config configs/train_mms_tts_kik_waxal.yaml \
+  --download-checkpoint
+```
+
+3. Run the generated launcher on a GPU machine, or launch the HF Jobs wrapper from a cloned repo:
+
+```bash
+bash scripts/hf_jobs_train_mms_tts_kik_waxal.sh /workspace/kikuyu-tts
+```
+
+4. Generate baseline samples and score candidates:
+
+```bash
+python scripts/eval_tts.py \
+  --prompts data/eval/kikuyu_prompts.txt \
+  --output-dir artifacts/tts_eval
+```
+
+5. Synthesize one sentence from any Hugging Face-format MMS/VITS model:
+
+```bash
+python scripts/synthesize_mms_tts_kik.py \
+  --model facebook/mms-tts-kik \
+  --text "Nĩ wega tũkĩe na ũgima na ũmwe." \
+  --output artifacts/tts_eval/single.wav
+```
+
+To compare existing open Kikuyu-capable TTS checkpoints before training, run the baseline workflow:
 
 ```bash
 python scripts/prepare_mms_tts_finetune.py \
   --config configs/finetune_mms_tts_kik.yaml
 ```
 
-3. Use the exported Hugging Face-format checkpoint with the existing MMS inference path in `src/kikuyu_tts/mlx_fork.py`.
+Then use the exported Hugging Face-format checkpoint with the existing MMS inference path in `src/kikuyu_tts/mlx_fork.py`.
 
 ## MMS Fine-Tune Prep
 
@@ -67,4 +99,4 @@ Default shortlist:
 
 ## Important Constraint
 
-The current Hugging Face `transformers` `VitsModel` supports inference and export, but not gradient-based training. The MMS workflow implemented here prepares and selects the best base model for Waxal and exports it in Hugging Face format; the only in-repo trainable path today remains the Coqui scratch-VITS workflow.
+The current Hugging Face `transformers` `VitsModel` supports inference and export, but not gradient-based training. Real MMS fine-tuning uses the full MMS/VITS checkpoint route bootstrapped by `scripts/bootstrap_mms_kikuyu_tts_finetune.py`.
