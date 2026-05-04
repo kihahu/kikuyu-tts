@@ -69,6 +69,22 @@ def resolve_repo_path(repo_root: Path, value: str | Path) -> Path:
     return path if path.is_absolute() else repo_root / path
 
 
+def read_checkpoint_iteration(path: Path) -> int:
+    try:
+        import torch
+    except ImportError:
+        return 0
+
+    checkpoint = torch.load(path, map_location="cpu")
+    if not isinstance(checkpoint, dict):
+        return 0
+    for key in ("iteration", "epoch", "global_step"):
+        value = checkpoint.get(key)
+        if isinstance(value, int):
+            return value
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Bootstrap MMS Kikuyu TTS fine-tuning with a prepared VITS filelist dataset."
@@ -138,6 +154,12 @@ def main() -> None:
     ensure_file(checkpoint_dir / "config.json", "MMS config")
     ensure_file(checkpoint_dir / "vocab.txt", "MMS vocab")
 
+    base_iteration = read_checkpoint_iteration(checkpoint_dir / "G_100000.pth")
+    requested_epochs = int(args.epochs or training_cfg.get("epochs", 10000))
+    effective_epochs = requested_epochs
+    if args.epochs and base_iteration and requested_epochs <= base_iteration:
+        effective_epochs = base_iteration + requested_epochs
+
     base_config = load_json(checkpoint_dir / "config.json")
     patched_config = json.loads(json.dumps(base_config))
     patch_nested(patched_config, ["data", "training_files"], str(train_filelist))
@@ -147,7 +169,7 @@ def main() -> None:
     patch_nested(patched_config, ["train", "batch_size"], int(args.batch_size or training_cfg.get("batch_size", 16)))
     patch_nested(patched_config, ["train", "fp16_run"], bool(training_cfg.get("fp16_run", True)))
     patch_nested(patched_config, ["train", "learning_rate"], float(training_cfg.get("learning_rate", 0.00005)))
-    patch_nested(patched_config, ["train", "epochs"], int(args.epochs or training_cfg.get("epochs", 10000)))
+    patch_nested(patched_config, ["train", "epochs"], effective_epochs)
     patch_nested(patched_config, ["train", "eval_interval"], int(args.eval_interval or training_cfg.get("eval_interval", 200)))
     patch_nested(patched_config, ["train", "log_interval"], int(args.log_interval or training_cfg.get("log_interval", 50)))
     patch_nested(patched_config, ["train", "seed"], int(training_cfg.get("seed", 42)))
@@ -244,6 +266,9 @@ def main() -> None:
         "vits_n_speakers": vits_n_speakers,
         "sample_rate": sample_rate,
         "run_name": run_name,
+        "base_iteration": base_iteration,
+        "requested_epochs": requested_epochs,
+        "effective_epochs": effective_epochs,
         "hub_repo_id": cfg.get("hub", {}).get("repo_id", ""),
         "notes": [
             "This is the real MMS/VITS continuation path; Transformers VitsModel remains inference-only.",
