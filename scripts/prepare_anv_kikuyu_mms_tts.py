@@ -188,12 +188,35 @@ def main() -> None:
     missing = [source_split for source_split in split_map.values() if source_split not in dataset]
     if missing:
         raise ValueError(f"Missing expected splits in {args.dataset_name}: {missing}")
+    print(
+        json.dumps(
+            {
+                "event": "dataset_loaded",
+                "dataset_name": args.dataset_name,
+                "split_map": split_map,
+                "streaming": bool(args.streaming),
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
 
     speaker_counts: defaultdict[str, int] = defaultdict(int)
     accepted_rows: list[dict[str, Any]] = []
     skip_reasons: defaultdict[str, int] = defaultdict(int)
 
     for output_split, source_split in split_map.items():
+        print(
+            json.dumps(
+                {
+                    "event": "split_start",
+                    "source_split": source_split,
+                    "output_split": output_split,
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
         ds = dataset[source_split].cast_column("audio", Audio(sampling_rate=args.target_sample_rate))
         written_for_split = 0
         for idx, row in enumerate(ds):
@@ -255,6 +278,31 @@ def main() -> None:
                 }
             )
             written_for_split += 1
+            if written_for_split == 1 or written_for_split % 500 == 0:
+                print(
+                    json.dumps(
+                        {
+                            "event": "accepted_rows",
+                            "source_split": source_split,
+                            "output_split": output_split,
+                            "count": written_for_split,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+        print(
+            json.dumps(
+                {
+                    "event": "split_done",
+                    "source_split": source_split,
+                    "output_split": output_split,
+                    "accepted": written_for_split,
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
 
     if not accepted_rows:
         raise RuntimeError("No rows survived filtering. Relax filters or enable unscripted rows.")
