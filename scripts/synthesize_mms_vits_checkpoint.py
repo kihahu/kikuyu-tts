@@ -49,6 +49,20 @@ def ensure_vits_repo(path: Path) -> None:
 
 
 def patch_vits_repo(path: Path, vocab_path: Path) -> None:
+    if (path / ".git").exists():
+        run(
+            [
+                "git",
+                "checkout",
+                "--",
+                "text/symbols.py",
+                "text/__init__.py",
+                "text/cleaners.py",
+                "monotonic_align/setup.py",
+            ],
+            cwd=path,
+        )
+
     symbols_path = path / "text" / "symbols.py"
     symbols_path.write_text(
         "\n".join(
