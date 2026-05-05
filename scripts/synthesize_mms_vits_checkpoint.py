@@ -76,6 +76,22 @@ def patch_vits_repo(path: Path, vocab_path: Path) -> None:
     )
     text_init_path.write_text(text_init, encoding="utf-8")
 
+    cleaners_path = path / "text" / "cleaners.py"
+    cleaners = cleaners_path.read_text(encoding="utf-8")
+    cleaners = cleaners.replace(
+        "from phonemizer import phonemize",
+        "\ntry:\n  from phonemizer import phonemize\nexcept ImportError:\n  phonemize = None",
+    )
+    cleaners = cleaners.replace(
+        "  phonemes = phonemize(text, language='en-us', backend='espeak', strip=True)",
+        "  if phonemize is None:\n    raise RuntimeError('phonemizer is required for english_cleaners')\n  phonemes = phonemize(text, language='en-us', backend='espeak', strip=True)",
+    )
+    cleaners = cleaners.replace(
+        "  phonemes = phonemize(text, language='en-us', backend='espeak', strip=True, preserve_punctuation=True, with_stress=True)",
+        "  if phonemize is None:\n    raise RuntimeError('phonemizer is required for english_cleaners2')\n  phonemes = phonemize(text, language='en-us', backend='espeak', strip=True, preserve_punctuation=True, with_stress=True)",
+    )
+    cleaners_path.write_text(cleaners, encoding="utf-8")
+
     nested_align = path / "monotonic_align" / "monotonic_align"
     nested_align.mkdir(parents=True, exist_ok=True)
     (nested_align / "__init__.py").write_text("", encoding="utf-8")
