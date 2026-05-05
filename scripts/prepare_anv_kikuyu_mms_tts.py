@@ -159,6 +159,7 @@ def main() -> None:
     parser.add_argument("--dev-split", default="validation")
     parser.add_argument("--test-split", default="test")
     parser.add_argument("--max-rows-per-split", type=int, default=0)
+    parser.add_argument("--streaming", action="store_true")
     parser.add_argument(
         "--token",
         default=None,
@@ -179,7 +180,11 @@ def main() -> None:
         "dev": args.dev_split,
         "test": args.test_split,
     }
-    dataset: DatasetDict | Any = load_dataset(args.dataset_name, **build_hub_auth(args.token))
+    dataset: DatasetDict | Any = load_dataset(
+        args.dataset_name,
+        streaming=args.streaming,
+        **build_hub_auth(args.token),
+    )
     missing = [source_split for source_split in split_map.values() if source_split not in dataset]
     if missing:
         raise ValueError(f"Missing expected splits in {args.dataset_name}: {missing}")

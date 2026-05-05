@@ -26,7 +26,8 @@ python scripts/prepare_anv_kikuyu_mms_tts.py \
   --min-duration-sec "${ANV_MIN_DURATION_SEC:-1.0}" \
   --max-duration-sec "${ANV_MAX_DURATION_SEC:-15.0}" \
   --speaker-mode "${ANV_SPEAKER_MODE:-single_speaker}" \
-  --max-rows-per-split "${ANV_MAX_ROWS_PER_SPLIT:-0}"
+  --max-rows-per-split "${ANV_MAX_ROWS_PER_SPLIT:-0}" \
+  ${ANV_STREAMING:+--streaming}
 
 BOOTSTRAP_ARGS=()
 if [ -n "${KIK_TTS_EPOCHS:-}" ]; then
