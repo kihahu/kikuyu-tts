@@ -18,6 +18,31 @@ def run(command: list[str], cwd: Path | None = None) -> None:
         raise RuntimeError(f"Command failed ({result.returncode}): {' '.join(command)}")
 
 
+def ensure_vits_dependencies() -> None:
+    missing = []
+    for module, package in (
+        ("Cython", "Cython"),
+        ("numpy", "numpy"),
+        ("unidecode", "Unidecode"),
+        ("matplotlib", "matplotlib"),
+        ("librosa", "librosa"),
+        ("scipy", "scipy"),
+    ):
+        try:
+            __import__(module)
+        except ImportError:
+            missing.append(package)
+
+    if missing:
+        package_list = " ".join(missing)
+        raise RuntimeError(
+            "Missing local dependencies required by raw MMS/VITS inference: "
+            f"{', '.join(missing)}.\n"
+            "Install them in this Python environment with:\n"
+            f"  {sys.executable} -m pip install {package_list}"
+        )
+
+
 def ensure_vits_repo(path: Path) -> None:
     if not path.exists():
         run(["git", "clone", "https://github.com/jaywalnut310/vits.git", str(path)])
@@ -125,6 +150,8 @@ def main() -> None:
         device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     else:
         device = args.device
+
+    ensure_vits_dependencies()
 
     checkpoint_path = Path(hf_hub_download(args.repo_id, args.checkpoint, repo_type="model"))
     config_path = Path(hf_hub_download(args.repo_id, args.config, repo_type="model"))
