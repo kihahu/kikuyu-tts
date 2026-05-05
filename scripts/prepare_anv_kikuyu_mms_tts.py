@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import re
 import unicodedata
 from collections import defaultdict
@@ -24,6 +25,7 @@ PUNCT_REPLACEMENTS = {
     "\u2014": "-",
 }
 DEFAULT_SPLITS = ("train", "dev", "dev_test")
+HF_TOKEN_CACHE_PATH = Path("~/.cache/huggingface/token").expanduser()
 
 
 def normalize_kikuyu_text(text: str) -> str:
@@ -55,6 +57,26 @@ def choose_text(row: dict[str, Any], include_unscripted: bool) -> tuple[str | No
     if include_unscripted and transcript:
         return transcript, "unscripted"
     return None, row_type or "unknown"
+
+
+def read_cached_hf_token() -> str | None:
+    if not HF_TOKEN_CACHE_PATH.is_file():
+        return None
+    token = HF_TOKEN_CACHE_PATH.read_text(encoding="utf-8").strip()
+    return token or None
+
+
+def build_hub_auth(cli_token: str | None = None) -> dict[str, str]:
+    if cli_token is not None and str(cli_token).strip():
+        return {"token": str(cli_token).strip()}
+    for key in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
+        raw = os.environ.get(key)
+        if raw and raw.strip():
+            return {"token": raw.strip()}
+    cached_token = read_cached_hf_token()
+    if cached_token:
+        return {"token": cached_token}
+    return {}
 
 
 def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -132,8 +154,16 @@ def main() -> None:
     parser.add_argument("--min-duration-sec", type=float, default=1.0)
     parser.add_argument("--max-duration-sec", type=float, default=15.0)
     parser.add_argument("--include-unscripted", action="store_true")
-    parser.add_argument("--speaker-mode", choices=("all", "dominant_only"), default="all")
+    parser.add_argument("--speaker-mode", choices=("all", "dominant_only", "single_speaker"), default="all")
+    parser.add_argument("--train-split", default="train")
+    parser.add_argument("--dev-split", default="validation")
+    parser.add_argument("--test-split", default="test")
     parser.add_argument("--max-rows-per-split", type=int, default=0)
+    parser.add_argument(
+        "--token",
+        default=None,
+        help="HF token for gated datasets. Defaults to HF_TOKEN, HUGGING_FACE_HUB_TOKEN, then ~/.cache/huggingface/token.",
+    )
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir).resolve()
@@ -144,8 +174,13 @@ def main() -> None:
     manifests_dir.mkdir(parents=True, exist_ok=True)
     filelists_dir.mkdir(parents=True, exist_ok=True)
 
-    dataset: DatasetDict | Any = load_dataset(args.dataset_name)
-    missing = [split for split in DEFAULT_SPLITS if split not in dataset]
+    split_map = {
+        "train": args.train_split,
+        "dev": args.dev_split,
+        "test": args.test_split,
+    }
+    dataset: DatasetDict | Any = load_dataset(args.dataset_name, **build_hub_auth(args.token))
+    missing = [source_split for source_split in split_map.values() if source_split not in dataset]
     if missing:
         raise ValueError(f"Missing expected splits in {args.dataset_name}: {missing}")
 
@@ -153,8 +188,8 @@ def main() -> None:
     accepted_rows: list[dict[str, Any]] = []
     skip_reasons: defaultdict[str, int] = defaultdict(int)
 
-    for split in DEFAULT_SPLITS:
-        ds = dataset[split].cast_column("audio", Audio(sampling_rate=args.target_sample_rate))
+    for output_split, source_split in split_map.items():
+        ds = dataset[source_split].cast_column("audio", Audio(sampling_rate=args.target_sample_rate))
         written_for_split = 0
         for idx, row in enumerate(ds):
             if args.max_rows_per_split and written_for_split >= args.max_rows_per_split:
@@ -191,9 +226,9 @@ def main() -> None:
             speaker_counts[speaker] += 1
 
             dialect = safe_name(row.get("sentenceDialect"), "unknown_dialect")
-            uid = safe_name(row.get("mediaPathId"), f"{split}_{idx:07d}")
-            utt_id = f"{split}_{uid}"
-            rel_path = Path("clips") / split / speaker / f"{utt_id}.wav"
+            uid = safe_name(row.get("mediaPathId"), f"{output_split}_{idx:07d}")
+            utt_id = f"{output_split}_{uid}"
+            rel_path = Path("clips") / output_split / speaker / f"{utt_id}.wav"
             abs_path = output_dir / rel_path
             abs_path.parent.mkdir(parents=True, exist_ok=True)
             sf.write(abs_path, samples, sample_rate, subtype="PCM_16")
@@ -204,7 +239,8 @@ def main() -> None:
                     "audio_path": str(abs_path),
                     "text": text,
                     "speaker": speaker,
-                    "split": split,
+                    "split": output_split,
+                    "source_split": source_split,
                     "source_type": source_type,
                     "dialect": dialect,
                     "domain": str(row.get("domain") or ""),
@@ -221,6 +257,9 @@ def main() -> None:
     dominant_speaker = max(speaker_counts.items(), key=lambda item: (item[1], item[0]))[0]
     if args.speaker_mode == "dominant_only":
         accepted_rows = [row for row in accepted_rows if row["speaker"] == dominant_speaker]
+    elif args.speaker_mode == "single_speaker":
+        for row in accepted_rows:
+            row["speaker"] = "anv_single_speaker"
 
     speaker_map = {speaker: idx for idx, speaker in enumerate(sorted({row["speaker"] for row in accepted_rows}))}
     for row in accepted_rows:
@@ -230,7 +269,7 @@ def main() -> None:
     for row in accepted_rows:
         rows_by_split[row["split"]].append(row)
 
-    for split in DEFAULT_SPLITS:
+    for split in split_map:
         rows = rows_by_split.get(split, [])
         write_jsonl(manifests_dir / f"{split}.jsonl", rows)
         write_manifest_bundle(manifests_dir / split, rows, output_dir)
@@ -242,6 +281,7 @@ def main() -> None:
     stats = {
         "dataset_name": args.dataset_name,
         "splits": list(DEFAULT_SPLITS),
+        "split_map": split_map,
         "include_unscripted": bool(args.include_unscripted),
         "speaker_mode": args.speaker_mode,
         "sample_rate": args.target_sample_rate,

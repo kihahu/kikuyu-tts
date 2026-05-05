@@ -1,0 +1,33 @@
+dataset:
+  prepared_dir: data/anv_kikuyu_mms_tts
+  train_filelist: filelists/train.txt
+  dev_filelist: filelists/dev.txt
+  test_filelist: filelists/test.txt
+  speaker_map: speaker_map.json
+  prep_stats: prep_stats.json
+
+model:
+  base_model: facebook/mms-tts-kik
+  full_checkpoint_url: https://dl.fbaipublicfiles.com/mms/tts/full_model/kik.tar.gz
+
+training:
+  run_name: mms_kik_waxal_anv_single_speaker
+  output_dir: artifacts/mms_tts_kik_anv_finetune
+  batch_size: 16
+  fp16_run: true
+  learning_rate: 0.00001
+  reset_optimizer: true
+  epochs: 400
+  eval_interval: 100
+  log_interval: 25
+  seed: 42
+  resume_repo_id: kihahu/mms-tts-kik-waxal-v1
+  resume_run_name: mms_kik_waxal_single_speaker
+  resume_step: 77100
+
+hub:
+  repo_id: kihahu/mms-tts-kik-waxal-anv-v1
+  upload_patterns:
+    - vits/logs/**
+    - generated_config/**
+    - bootstrap_summary.json
