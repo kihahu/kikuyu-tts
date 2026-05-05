@@ -4,12 +4,22 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
 import torch
 from huggingface_hub import hf_hub_download
+
+
+@dataclass
+class VitsCheckpoint:
+    commons: object
+    hps: object
+    net_g: torch.nn.Module
+    text_to_sequence: object
+    device: str
 
 
 def run(command: list[str], cwd: Path | None = None) -> None:
@@ -144,6 +154,80 @@ def normalize_text(text: str) -> str:
     return " ".join(text.split())
 
 
+def pick_device(raw: str) -> str:
+    if raw == "auto":
+        return "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+    return raw
+
+
+def load_checkpoint_for_synthesis(
+    *,
+    repo_id: str,
+    checkpoint: str,
+    config: str,
+    vocab: str,
+    vits_repo: Path,
+    device: str,
+) -> VitsCheckpoint:
+    ensure_vits_dependencies()
+
+    checkpoint_path = Path(hf_hub_download(repo_id, checkpoint, repo_type="model"))
+    config_path = Path(hf_hub_download(repo_id, config, repo_type="model"))
+    vocab_path = Path(hf_hub_download(repo_id, vocab, repo_type="model"))
+
+    vits_repo = vits_repo.resolve()
+    ensure_vits_repo(vits_repo)
+    patch_vits_repo(vits_repo, vocab_path)
+    commons, utils, SynthesizerTrn, text_to_sequence = load_vits_modules(vits_repo)
+
+    hps = utils.get_hparams_from_file(str(config_path))
+    net_g = SynthesizerTrn(
+        len(__import__("text.symbols", fromlist=["symbols"]).symbols),
+        hps.data.filter_length // 2 + 1,
+        hps.train.segment_size // hps.data.hop_length,
+        n_speakers=hps.data.n_speakers,
+        **hps.model,
+    ).to(device)
+    net_g.eval()
+    utils.load_checkpoint(str(checkpoint_path), net_g, None)
+    return VitsCheckpoint(
+        commons=commons,
+        hps=hps,
+        net_g=net_g,
+        text_to_sequence=text_to_sequence,
+        device=device,
+    )
+
+
+def synthesize_text(
+    model: VitsCheckpoint,
+    text: str,
+    *,
+    noise_scale: float = 0.667,
+    noise_scale_w: float = 0.8,
+    length_scale: float = 1.0,
+) -> np.ndarray:
+    text = normalize_text(text)
+    if not text:
+        return np.zeros(0, dtype=np.float32)
+
+    sequence = model.text_to_sequence(text, model.hps.data.text_cleaners)
+    if model.hps.data.add_blank:
+        sequence = model.commons.intersperse(sequence, 0)
+    x = torch.LongTensor(sequence).unsqueeze(0).to(model.device)
+    x_lengths = torch.LongTensor([x.size(1)]).to(model.device)
+
+    with torch.inference_mode():
+        audio = model.net_g.infer(
+            x,
+            x_lengths,
+            noise_scale=noise_scale,
+            noise_scale_w=noise_scale_w,
+            length_scale=length_scale,
+        )[0][0, 0].detach().cpu().numpy()
+    return np.asarray(audio, dtype=np.float32)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Synthesize Kikuyu audio from a raw MMS/VITS checkpoint.")
     parser.add_argument("--repo-id", default="kihahu/mms-tts-kik-waxal-v1")
@@ -176,52 +260,24 @@ def main() -> None:
     if not text:
         raise ValueError("Provide text with --text or --input.")
 
-    if args.device == "auto":
-        device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-    else:
-        device = args.device
-
-    ensure_vits_dependencies()
-
-    checkpoint_path = Path(hf_hub_download(args.repo_id, args.checkpoint, repo_type="model"))
-    config_path = Path(hf_hub_download(args.repo_id, args.config, repo_type="model"))
-    vocab_path = Path(hf_hub_download(args.repo_id, args.vocab, repo_type="model"))
-
-    vits_repo = Path(args.vits_repo).resolve()
-    ensure_vits_repo(vits_repo)
-    patch_vits_repo(vits_repo, vocab_path)
-    commons, utils, SynthesizerTrn, text_to_sequence = load_vits_modules(vits_repo)
-
-    hps = utils.get_hparams_from_file(str(config_path))
-    sequence = text_to_sequence(text, hps.data.text_cleaners)
-    if hps.data.add_blank:
-        sequence = commons.intersperse(sequence, 0)
-    x = torch.LongTensor(sequence).unsqueeze(0).to(device)
-    x_lengths = torch.LongTensor([x.size(1)]).to(device)
-
-    net_g = SynthesizerTrn(
-        len(__import__("text.symbols", fromlist=["symbols"]).symbols),
-        hps.data.filter_length // 2 + 1,
-        hps.train.segment_size // hps.data.hop_length,
-        n_speakers=hps.data.n_speakers,
-        **hps.model,
-    ).to(device)
-    net_g.eval()
-    utils.load_checkpoint(str(checkpoint_path), net_g, None)
-
-    with torch.inference_mode():
-        audio = net_g.infer(
-            x,
-            x_lengths,
-            noise_scale=args.noise_scale,
-            noise_scale_w=args.noise_scale_w,
-            length_scale=args.length_scale,
-        )[0][0, 0].detach().cpu().numpy()
-
-    audio = np.asarray(audio, dtype=np.float32)
+    model = load_checkpoint_for_synthesis(
+        repo_id=args.repo_id,
+        checkpoint=args.checkpoint,
+        config=args.config,
+        vocab=args.vocab,
+        vits_repo=Path(args.vits_repo),
+        device=pick_device(args.device),
+    )
+    audio = synthesize_text(
+        model,
+        text,
+        noise_scale=args.noise_scale,
+        noise_scale_w=args.noise_scale_w,
+        length_scale=args.length_scale,
+    )
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    sf.write(output_path, audio, int(hps.data.sampling_rate), subtype="PCM_16")
+    sf.write(output_path, audio, int(model.hps.data.sampling_rate), subtype="PCM_16")
     print(f"wrote {output_path}")
 
 
