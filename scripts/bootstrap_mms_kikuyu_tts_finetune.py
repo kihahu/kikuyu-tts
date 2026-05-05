@@ -85,6 +85,18 @@ def read_checkpoint_iteration(path: Path) -> int:
     return 0
 
 
+def download_hub_file(repo_id: str, filename: str, output_path: Path) -> Path:
+    try:
+        from huggingface_hub import hf_hub_download
+    except ImportError as exc:
+        raise RuntimeError("huggingface_hub is required when --resume-repo-id is set") from exc
+
+    cached_path = Path(hf_hub_download(repo_id, filename, repo_type="model"))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(cached_path, output_path)
+    return output_path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Bootstrap MMS Kikuyu TTS fine-tuning with a prepared VITS filelist dataset."
@@ -104,6 +116,9 @@ def main() -> None:
     parser.add_argument("--log-interval", type=int, default=0)
     parser.add_argument("--reset-optimizer", action="store_true")
     parser.add_argument("--keep-optimizer", action="store_true")
+    parser.add_argument("--resume-repo-id", default="")
+    parser.add_argument("--resume-step", type=int, default=0)
+    parser.add_argument("--resume-run-name", default="")
     parser.add_argument("--download-checkpoint", action="store_true")
     args = parser.parse_args()
 
@@ -157,11 +172,36 @@ def main() -> None:
     ensure_file(checkpoint_dir / "config.json", "MMS config")
     ensure_file(checkpoint_dir / "vocab.txt", "MMS vocab")
 
+    hub_repo_id = cfg.get("hub", {}).get("repo_id", "")
+    resume_repo_id = args.resume_repo_id or training_cfg.get("resume_repo_id", "")
+    resume_step = int(args.resume_step or training_cfg.get("resume_step", 0))
+    resume_run_name = args.resume_run_name or training_cfg.get("resume_run_name", run_name)
+    resume_checkpoint_dir = Path("")
+    resume_iteration = 0
+    if resume_step:
+        resume_repo_id = resume_repo_id or hub_repo_id
+        if not resume_repo_id:
+            raise ValueError("--resume-step requires --resume-repo-id or hub.repo_id in config")
+        resume_checkpoint_dir = output_dir / "resume_checkpoint"
+        resume_prefix = f"mms_vits_finetune/vits/logs/{resume_run_name}"
+        resume_g = download_hub_file(
+            resume_repo_id,
+            f"{resume_prefix}/G_{resume_step}.pth",
+            resume_checkpoint_dir / f"G_{resume_step}.pth",
+        )
+        download_hub_file(
+            resume_repo_id,
+            f"{resume_prefix}/D_{resume_step}.pth",
+            resume_checkpoint_dir / f"D_{resume_step}.pth",
+        )
+        resume_iteration = read_checkpoint_iteration(resume_g)
+
     base_iteration = read_checkpoint_iteration(checkpoint_dir / "G_100000.pth")
+    start_iteration = resume_iteration or base_iteration
     requested_epochs = int(args.epochs or training_cfg.get("epochs", 10000))
     effective_epochs = requested_epochs
-    if base_iteration and requested_epochs <= base_iteration:
-        effective_epochs = base_iteration + requested_epochs
+    if start_iteration and requested_epochs <= start_iteration:
+        effective_epochs = start_iteration + requested_epochs
     reset_optimizer = bool(training_cfg.get("reset_optimizer", False))
     if args.reset_optimizer:
         reset_optimizer = True
@@ -202,6 +242,8 @@ def main() -> None:
                 f'RUN_NAME="${{RUN_NAME:-{run_name}}}"',
                 f'CONFIG_PATH="{config_out.as_posix()}"',
                 f'BASE_CKPT_DIR="{checkpoint_dir.as_posix()}"',
+                f'RESUME_CKPT_DIR="{resume_checkpoint_dir.as_posix() if resume_step else ""}"',
+                f'RESUME_STEP="{resume_step}"',
                 f'RESET_OPTIMIZER="${{RESET_OPTIMIZER:-{int(reset_optimizer)}}}"',
                 "",
                 'if [ ! -d "$VITS_REPO" ]; then',
@@ -276,8 +318,13 @@ def main() -> None:
                 "pip install Cython 'librosa>=0.10.1' matplotlib phonemizer scipy tensorboard Unidecode",
                 "(cd monotonic_align && python setup.py build_ext --inplace)",
                 'mkdir -p "logs/$RUN_NAME"',
-                'cp -n "$BASE_CKPT_DIR/G_100000.pth" "logs/$RUN_NAME/G_100000.pth"',
-                'cp -n "$BASE_CKPT_DIR/D_100000.pth" "logs/$RUN_NAME/D_100000.pth"',
+                'if [ -n "$RESUME_CKPT_DIR" ]; then',
+                '  cp "$RESUME_CKPT_DIR/G_${RESUME_STEP}.pth" "logs/$RUN_NAME/G_${RESUME_STEP}.pth"',
+                '  cp "$RESUME_CKPT_DIR/D_${RESUME_STEP}.pth" "logs/$RUN_NAME/D_${RESUME_STEP}.pth"',
+                "else",
+                '  cp -n "$BASE_CKPT_DIR/G_100000.pth" "logs/$RUN_NAME/G_100000.pth"',
+                '  cp -n "$BASE_CKPT_DIR/D_100000.pth" "logs/$RUN_NAME/D_100000.pth"',
+                "fi",
                 'cp -n "$BASE_CKPT_DIR/vocab.txt" "logs/$RUN_NAME/vocab.txt"',
                 'cp "$CONFIG_PATH" "logs/$RUN_NAME/config.json"',
                 'export MMS_VOCAB_FILE="$BASE_CKPT_DIR/vocab.txt"',
@@ -302,10 +349,13 @@ def main() -> None:
         "sample_rate": sample_rate,
         "run_name": run_name,
         "base_iteration": base_iteration,
+        "resume_repo_id": resume_repo_id,
+        "resume_step": resume_step,
+        "resume_iteration": resume_iteration,
         "requested_epochs": requested_epochs,
         "effective_epochs": effective_epochs,
         "reset_optimizer": reset_optimizer,
-        "hub_repo_id": cfg.get("hub", {}).get("repo_id", ""),
+        "hub_repo_id": hub_repo_id,
         "notes": [
             "This is the real MMS/VITS continuation path; Transformers VitsModel remains inference-only.",
             "For Waxal v1, use the single-speaker filelists by default for a cleaner voice.",

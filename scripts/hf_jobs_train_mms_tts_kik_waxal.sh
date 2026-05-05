@@ -53,6 +53,15 @@ if [ "${KIK_TTS_RESET_OPTIMIZER:-1}" = "1" ]; then
 else
   BOOTSTRAP_ARGS+=(--keep-optimizer)
 fi
+if [ -n "${KIK_TTS_RESUME_REPO_ID:-}" ]; then
+  BOOTSTRAP_ARGS+=(--resume-repo-id "$KIK_TTS_RESUME_REPO_ID")
+fi
+if [ -n "${KIK_TTS_RESUME_STEP:-}" ]; then
+  BOOTSTRAP_ARGS+=(--resume-step "$KIK_TTS_RESUME_STEP")
+fi
+if [ -n "${KIK_TTS_RESUME_RUN_NAME:-}" ]; then
+  BOOTSTRAP_ARGS+=(--resume-run-name "$KIK_TTS_RESUME_RUN_NAME")
+fi
 
 python scripts/bootstrap_mms_kikuyu_tts_finetune.py \
   --config "$CONFIG_PATH" \
