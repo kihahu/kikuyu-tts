@@ -17,7 +17,7 @@ if command -v apt-get >/dev/null 2>&1; then
 fi
 
 python -m pip install --upgrade pip
-python -m pip install "torch>=2.3,<2.6" "huggingface_hub>=0.24.0" "datasets[audio]>=3.0.0" soundfile pyyaml
+python -m pip install "torch>=2.3,<2.6" "huggingface_hub>=0.24.0" "datasets[audio]>=3.0.0,<4.0.0" soundfile pyyaml
 
 python scripts/prepare_waxal_kik_tts.py \
   --dataset-name google/WaxalNLP \
