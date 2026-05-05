@@ -99,8 +99,11 @@ def main() -> None:
     parser.add_argument("--speaker-map", default="")
     parser.add_argument("--epochs", type=int, default=0)
     parser.add_argument("--batch-size", type=int, default=0)
+    parser.add_argument("--learning-rate", type=float, default=0.0)
     parser.add_argument("--eval-interval", type=int, default=0)
     parser.add_argument("--log-interval", type=int, default=0)
+    parser.add_argument("--reset-optimizer", action="store_true")
+    parser.add_argument("--keep-optimizer", action="store_true")
     parser.add_argument("--download-checkpoint", action="store_true")
     args = parser.parse_args()
 
@@ -157,8 +160,13 @@ def main() -> None:
     base_iteration = read_checkpoint_iteration(checkpoint_dir / "G_100000.pth")
     requested_epochs = int(args.epochs or training_cfg.get("epochs", 10000))
     effective_epochs = requested_epochs
-    if args.epochs and base_iteration and requested_epochs <= base_iteration:
+    if base_iteration and requested_epochs <= base_iteration:
         effective_epochs = base_iteration + requested_epochs
+    reset_optimizer = bool(training_cfg.get("reset_optimizer", False))
+    if args.reset_optimizer:
+        reset_optimizer = True
+    if args.keep_optimizer:
+        reset_optimizer = False
 
     base_config = load_json(checkpoint_dir / "config.json")
     patched_config = json.loads(json.dumps(base_config))
@@ -168,7 +176,11 @@ def main() -> None:
     patch_nested(patched_config, ["data", "sampling_rate"], sample_rate)
     patch_nested(patched_config, ["train", "batch_size"], int(args.batch_size or training_cfg.get("batch_size", 16)))
     patch_nested(patched_config, ["train", "fp16_run"], bool(training_cfg.get("fp16_run", True)))
-    patch_nested(patched_config, ["train", "learning_rate"], float(training_cfg.get("learning_rate", 0.00005)))
+    patch_nested(
+        patched_config,
+        ["train", "learning_rate"],
+        float(args.learning_rate or training_cfg.get("learning_rate", 0.00002)),
+    )
     patch_nested(patched_config, ["train", "epochs"], effective_epochs)
     patch_nested(patched_config, ["train", "eval_interval"], int(args.eval_interval or training_cfg.get("eval_interval", 200)))
     patch_nested(patched_config, ["train", "log_interval"], int(args.log_interval or training_cfg.get("log_interval", 50)))
@@ -190,6 +202,7 @@ def main() -> None:
                 f'RUN_NAME="${{RUN_NAME:-{run_name}}}"',
                 f'CONFIG_PATH="{config_out.as_posix()}"',
                 f'BASE_CKPT_DIR="{checkpoint_dir.as_posix()}"',
+                f'RESET_OPTIMIZER="${{RESET_OPTIMIZER:-{int(reset_optimizer)}}}"',
                 "",
                 'if [ ! -d "$VITS_REPO" ]; then',
                 '  git clone https://github.com/jaywalnut310/vits.git "$VITS_REPO"',
@@ -200,6 +213,10 @@ def main() -> None:
                 "path = Path('train_ms.py')",
                 "text = path.read_text(encoding='utf-8')",
                 "text = text.replace(\"os.environ['MASTER_PORT'] = '80000'\", \"os.environ['MASTER_PORT'] = '29500'\")",
+                "text = text.replace(",
+                "    \"  try:\\n    _, _, _, epoch_str = utils.load_checkpoint(utils.latest_checkpoint_path(hps.model_dir, \\\"G_*.pth\\\"), net_g, optim_g)\\n    _, _, _, epoch_str = utils.load_checkpoint(utils.latest_checkpoint_path(hps.model_dir, \\\"D_*.pth\\\"), net_d, optim_d)\\n    global_step = (epoch_str - 1) * len(train_loader)\\n  except:\\n    epoch_str = 1\\n    global_step = 0\\n\\n  scheduler_g = torch.optim.lr_scheduler.ExponentialLR(optim_g, gamma=hps.train.lr_decay, last_epoch=epoch_str-2)\\n  scheduler_d = torch.optim.lr_scheduler.ExponentialLR(optim_d, gamma=hps.train.lr_decay, last_epoch=epoch_str-2)\",",
+                "    \"  reset_optimizer = os.environ.get('RESET_OPTIMIZER', '0').lower() in {'1', 'true', 'yes'}\\n  try:\\n    load_optim_g = None if reset_optimizer else optim_g\\n    load_optim_d = None if reset_optimizer else optim_d\\n    _, _, _, epoch_str = utils.load_checkpoint(utils.latest_checkpoint_path(hps.model_dir, \\\"G_*.pth\\\"), net_g, load_optim_g)\\n    _, _, _, epoch_str = utils.load_checkpoint(utils.latest_checkpoint_path(hps.model_dir, \\\"D_*.pth\\\"), net_d, load_optim_d)\\n    global_step = (epoch_str - 1) * len(train_loader)\\n  except:\\n    epoch_str = 1\\n    global_step = 0\\n  scheduler_last_epoch = -1 if reset_optimizer else epoch_str - 2\\n\\n  scheduler_g = torch.optim.lr_scheduler.ExponentialLR(optim_g, gamma=hps.train.lr_decay, last_epoch=scheduler_last_epoch)\\n  scheduler_d = torch.optim.lr_scheduler.ExponentialLR(optim_d, gamma=hps.train.lr_decay, last_epoch=scheduler_last_epoch)\",",
+                ")",
                 "path.write_text(text, encoding='utf-8')",
                 "symbols_path = Path('text/symbols.py')",
                 "symbols_path.write_text(",
@@ -287,6 +304,7 @@ def main() -> None:
         "base_iteration": base_iteration,
         "requested_epochs": requested_epochs,
         "effective_epochs": effective_epochs,
+        "reset_optimizer": reset_optimizer,
         "hub_repo_id": cfg.get("hub", {}).get("repo_id", ""),
         "notes": [
             "This is the real MMS/VITS continuation path; Transformers VitsModel remains inference-only.",

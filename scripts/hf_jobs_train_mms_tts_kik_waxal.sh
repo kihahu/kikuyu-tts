@@ -39,11 +39,19 @@ fi
 if [ -n "${KIK_TTS_BATCH_SIZE:-}" ]; then
   BOOTSTRAP_ARGS+=(--batch-size "$KIK_TTS_BATCH_SIZE")
 fi
+if [ -n "${KIK_TTS_LEARNING_RATE:-}" ]; then
+  BOOTSTRAP_ARGS+=(--learning-rate "$KIK_TTS_LEARNING_RATE")
+fi
 if [ -n "${KIK_TTS_EVAL_INTERVAL:-}" ]; then
   BOOTSTRAP_ARGS+=(--eval-interval "$KIK_TTS_EVAL_INTERVAL")
 fi
 if [ -n "${KIK_TTS_LOG_INTERVAL:-}" ]; then
   BOOTSTRAP_ARGS+=(--log-interval "$KIK_TTS_LOG_INTERVAL")
+fi
+if [ "${KIK_TTS_RESET_OPTIMIZER:-1}" = "1" ]; then
+  BOOTSTRAP_ARGS+=(--reset-optimizer)
+else
+  BOOTSTRAP_ARGS+=(--keep-optimizer)
 fi
 
 python scripts/bootstrap_mms_kikuyu_tts_finetune.py \
