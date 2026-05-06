@@ -122,6 +122,11 @@ HUB_REPO_ID="${HUB_CONFIG[0]:-}"
 UPLOAD_PATTERNS=("${HUB_CONFIG[@]:1}")
 UPLOAD_PATTERNS_JSON="$(printf '%s\n' "${UPLOAD_PATTERNS[@]}" | python -c 'import json,sys; print(json.dumps([line.strip() for line in sys.stdin if line.strip()]))')"
 
+if [ "${ANV_DISABLE_HUB_UPLOAD:-0}" = "1" ]; then
+  echo "ANV_DISABLE_HUB_UPLOAD=1; skipping Hub repo creation and artifact sync."
+  HUB_REPO_ID=""
+fi
+
 if [ -n "$HUB_REPO_ID" ]; then
   python - <<PY
 from huggingface_hub import HfApi

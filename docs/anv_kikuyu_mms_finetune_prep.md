@@ -99,6 +99,8 @@ hf jobs run --detach --flavor cpu-upgrade --timeout 2h --secrets HF_TOKEN \
   'git clone https://github.com/kihahu/kikuyu-tts.git /workspace/kikuyu-tts && bash /workspace/kikuyu-tts/scripts/hf_jobs_train_mms_tts_kik_anv.sh /workspace/kikuyu-tts'
 ```
 
+For a training-start smoke when the token cannot create or write the configured Hub repo, set `ANV_DISABLE_HUB_UPLOAD=1`. That skips repo creation and artifact sync but still runs local prep, bootstrap, and VITS training.
+
 ## Next Step: Full MMS Checkpoint
 
 For actual fine-tuning, do not use only the Hugging Face inference checkpoint. Use the full MMS Kikuyu checkpoint instead:
