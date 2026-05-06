@@ -183,6 +183,17 @@ Local ASR-proxy comparison artifacts were written under:
 artifacts/tts_eval/anv_comparison/
 ```
 
+Build a local listening page for the matched WAVs with:
+
+```bash
+python scripts/build_tts_listening_sheet.py \
+  --manifest artifacts/tts_eval/anv_comparison/manifest.csv \
+  --manifest artifacts/tts_eval/anv_comparison/length_scale_manifest.csv \
+  --manifest artifacts/tts_eval/anv_comparison/low_lr_manifest.csv \
+  --output artifacts/tts_eval/anv_comparison/listening_sheet.html \
+  --title 'Kikuyu TTS ANV Comparison'
+```
+
 The five-prompt ASR proxy did not prove that the ANV checkpoints are better than Waxal `G_77100`:
 
 ```text
