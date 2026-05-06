@@ -73,7 +73,18 @@ hf jobs run --detach --flavor cpu-basic --timeout 30m --secrets HF_TOKEN \
   'git clone https://github.com/kihahu/kikuyu-tts.git /workspace/kikuyu-tts && bash /workspace/kikuyu-tts/scripts/hf_jobs_train_mms_tts_kik_anv.sh /workspace/kikuyu-tts'
 ```
 
-Only after this succeeds should you run a decode smoke with `ANV_SMOKE_DECODE_AUDIO=1`, then a bounded full prep with `ANV_MAX_ROWS_PER_SPLIT`, and only then a GPU training job.
+Only after this succeeds should you run a decode smoke with `ANV_SMOKE_DECODE_AUDIO=1`, then a bounded prep-only job, and only then a GPU training job.
+
+Bounded prep-only job:
+
+```bash
+hf jobs run --detach --flavor cpu-basic --timeout 30m --secrets HF_TOKEN \
+  --env ANV_PREP_ONLY=1 \
+  --env ANV_STREAMING=1 \
+  --env ANV_MAX_ROWS_PER_SPLIT=1 \
+  python:3.10 \
+  'git clone https://github.com/kihahu/kikuyu-tts.git /workspace/kikuyu-tts && bash /workspace/kikuyu-tts/scripts/hf_jobs_train_mms_tts_kik_anv.sh /workspace/kikuyu-tts'
+```
 
 ## Next Step: Full MMS Checkpoint
 

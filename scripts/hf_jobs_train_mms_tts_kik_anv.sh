@@ -11,9 +11,15 @@ if [ -z "${HF_TOKEN:-}" ]; then
   exit 1
 fi
 
+ANV_PREP_ONLY="${ANV_PREP_ONLY:-0}"
+ANV_LIGHTWEIGHT_PREP=0
+if [ "${ANV_SMOKE_ONLY:-0}" = "1" ] || [ "$ANV_PREP_ONLY" = "1" ]; then
+  ANV_LIGHTWEIGHT_PREP=1
+fi
+
 if command -v apt-get >/dev/null 2>&1; then
   apt-get update
-  if [ "${ANV_SMOKE_ONLY:-0}" = "1" ]; then
+  if [ "$ANV_LIGHTWEIGHT_PREP" = "1" ]; then
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg
   else
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg git build-essential espeak-ng
@@ -41,7 +47,11 @@ if [ "${ANV_SMOKE_ONLY:-0}" = "1" ]; then
   exit 0
 fi
 
-python -m pip install "torch>=2.3,<2.6" "huggingface_hub>=0.24.0" "datasets[audio]>=3.0.0,<4.0.0" soundfile pyyaml
+if [ "$ANV_LIGHTWEIGHT_PREP" = "1" ]; then
+  python -m pip install "huggingface_hub>=0.24.0" "datasets>=3.0.0,<4.0.0" numpy soundfile
+else
+  python -m pip install "torch>=2.3,<2.6" "huggingface_hub>=0.24.0" "datasets[audio]>=3.0.0,<4.0.0" soundfile pyyaml
+fi
 
 python scripts/prepare_anv_kikuyu_mms_tts.py \
   --dataset-name Anv-ke/kikuyu \
@@ -52,6 +62,10 @@ python scripts/prepare_anv_kikuyu_mms_tts.py \
   --speaker-mode "${ANV_SPEAKER_MODE:-single_speaker}" \
   --max-rows-per-split "${ANV_MAX_ROWS_PER_SPLIT:-0}" \
   ${ANV_STREAMING:+--streaming}
+
+if [ "$ANV_PREP_ONLY" = "1" ]; then
+  exit 0
+fi
 
 BOOTSTRAP_ARGS=()
 if [ -n "${KIK_TTS_EPOCHS:-}" ]; then
