@@ -7,13 +7,13 @@ This workflow prepares the Hugging Face dataset [`Anv-ke/kikuyu`](https://huggin
 `scripts/prepare_anv_kikuyu_mms_tts.py` downloads and filters the dataset, normalizes text, resamples audio to 16 kHz, and writes:
 
 - `data/anv_kikuyu_mms_tts/clips/...`
-- `data/anv_kikuyu_mms_tts/manifests/{train,dev,dev_test}.jsonl`
-- `data/anv_kikuyu_mms_tts/manifests/{train,dev,dev_test}.tsv`
-- `data/anv_kikuyu_mms_tts/manifests/{train,dev,dev_test}.txt`
-- `data/anv_kikuyu_mms_tts/manifests/{train,dev,dev_test}.uid`
-- `data/anv_kikuyu_mms_tts/manifests/{train,dev,dev_test}.spk`
-- `data/anv_kikuyu_mms_tts/manifests/{train,dev,dev_test}.lang`
-- `data/anv_kikuyu_mms_tts/filelists/{train,dev,dev_test}.txt`
+- `data/anv_kikuyu_mms_tts/manifests/{train,dev,test}.jsonl`
+- `data/anv_kikuyu_mms_tts/manifests/{train,dev,test}.tsv`
+- `data/anv_kikuyu_mms_tts/manifests/{train,dev,test}.txt`
+- `data/anv_kikuyu_mms_tts/manifests/{train,dev,test}.uid`
+- `data/anv_kikuyu_mms_tts/manifests/{train,dev,test}.spk`
+- `data/anv_kikuyu_mms_tts/manifests/{train,dev,test}.lang`
+- `data/anv_kikuyu_mms_tts/filelists/{train,dev,test}.txt`
 
 The `.tsv/.txt/.uid/.spk/.lang` bundle is the fairseq-style manifest set. The filelists are a practical fallback for VITS-style training wrappers.
 
@@ -22,8 +22,9 @@ The `.tsv/.txt/.uid/.spk/.lang` bundle is the fairseq-style manifest set. The fi
 The default script configuration is intentionally conservative:
 
 - dataset: `Anv-ke/kikuyu`
-- splits: `train`, `dev`, `dev_test`
-- text: scripted only, from `actualSentence`
+- source splits: `train`, `validation`, `test`
+- output splits: `train`, `dev`, `test`
+- text: scripted rows from `actualSentence` on older exports or `transcription` on the current export
 - sample rate: `16000`
 - duration filter: `1s` to `15s`
 - speakers: all speakers retained
@@ -46,6 +47,33 @@ Optional flags:
 - `--include-unscripted`
 - `--speaker-mode dominant_only`
 - `--max-rows-per-split 5000`
+
+## Cheap Row Probe
+
+Before spending GPU time, prove that the gated ANV dataset can yield at least one usable audio/text row:
+
+```bash
+python scripts/prepare_anv_kikuyu_mms_tts.py \
+  --dataset-name Anv-ke/kikuyu \
+  --probe-one-row \
+  --probe-split train \
+  --probe-max-rows 200
+```
+
+This streams only the requested split, keeps `Audio(decode=False)`, prints the first row with usable text and audio payload metadata, and exits before writing clips or manifests. To also prove `ffmpeg` can decode that row without preparing the whole dataset, add `--probe-decode-audio`.
+
+For Hugging Face Jobs, run the same gate through the training wrapper:
+
+```bash
+hf jobs run --detach --flavor cpu-basic --timeout 30m --secrets HF_TOKEN \
+  --env ANV_SMOKE_ONLY=1 \
+  --env ANV_PROBE_SPLIT=train \
+  --env ANV_PROBE_MAX_ROWS=200 \
+  python:3.10 \
+  'git clone https://github.com/kihahu/kikuyu-tts.git /workspace/kikuyu-tts && bash /workspace/kikuyu-tts/scripts/hf_jobs_train_mms_tts_kik_anv.sh /workspace/kikuyu-tts'
+```
+
+Only after this succeeds should you run a decode smoke with `ANV_SMOKE_DECODE_AUDIO=1`, then a bounded full prep with `ANV_MAX_ROWS_PER_SPLIT`, and only then a GPU training job.
 
 ## Next Step: Full MMS Checkpoint
 
@@ -85,5 +113,5 @@ The launcher clones the official VITS repo if needed, builds monotonic alignment
 
 ## Notes
 
-- `dev_test` is kept because it exists in the ANV public dataset and is useful as a held-out evaluation split before touching the locked `test` set.
+- The current ANV dataset splits are `train`, `validation`, and `test`; the prep maps them to `train`, `dev`, and `test` for VITS/fairseq compatibility.
 - If the first full MMS run is unstable, keep the same prep but rerun with `--speaker-mode dominant_only` to reduce speaker variance before debugging optimizer or checkpoint issues.

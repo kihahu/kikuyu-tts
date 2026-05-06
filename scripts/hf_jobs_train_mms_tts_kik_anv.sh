@@ -19,6 +19,24 @@ fi
 python -m pip install --upgrade pip
 python -m pip install "torch>=2.3,<2.6" "huggingface_hub>=0.24.0" "datasets[audio]>=3.0.0,<4.0.0" soundfile pyyaml
 
+if [ "${ANV_SMOKE_ONLY:-0}" = "1" ]; then
+  PROBE_ARGS=()
+  if [ "${ANV_SMOKE_DECODE_AUDIO:-0}" = "1" ]; then
+    PROBE_ARGS+=(--probe-decode-audio)
+  fi
+  if [ "${ANV_INCLUDE_UNSCRIPTED:-0}" = "1" ]; then
+    PROBE_ARGS+=(--include-unscripted)
+  fi
+  python scripts/prepare_anv_kikuyu_mms_tts.py \
+    --dataset-name Anv-ke/kikuyu \
+    --target-sample-rate 16000 \
+    --probe-one-row \
+    --probe-split "${ANV_PROBE_SPLIT:-train}" \
+    --probe-max-rows "${ANV_PROBE_MAX_ROWS:-200}" \
+    "${PROBE_ARGS[@]}"
+  exit 0
+fi
+
 python scripts/prepare_anv_kikuyu_mms_tts.py \
   --dataset-name Anv-ke/kikuyu \
   --output-dir data/anv_kikuyu_mms_tts \

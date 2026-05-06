@@ -27,7 +27,7 @@ PUNCT_REPLACEMENTS = {
     "\u2013": "-",
     "\u2014": "-",
 }
-DEFAULT_SPLITS = ("train", "dev", "dev_test")
+DEFAULT_SPLITS = ("train", "dev", "test")
 HF_TOKEN_CACHE_PATH = Path("~/.cache/huggingface/token").expanduser()
 
 
@@ -53,12 +53,15 @@ def safe_name(value: Any, default: str) -> str:
 def choose_text(row: dict[str, Any], include_unscripted: bool) -> tuple[str | None, str]:
     row_type = str(row.get("type") or "").strip().lower()
     actual = str(row.get("actualSentence") or "").strip()
+    transcription = str(row.get("transcription") or "").strip()
     transcript = str(row.get("transcript") or "").strip()
 
     if actual:
         return actual, "scripted"
-    if include_unscripted and transcript:
-        return transcript, "unscripted"
+    if transcription and (row_type != "unscripted" or include_unscripted):
+        return transcription, row_type or "transcription"
+    if transcript and (row_type != "unscripted" or include_unscripted):
+        return transcript, row_type or "transcript"
     return None, row_type or "unknown"
 
 
@@ -101,11 +104,13 @@ def write_summary_csv(path: Path, rows: list[dict[str, Any]]) -> None:
                 "speaker",
                 "speaker_id",
                 "split",
+                "source_split",
                 "source_type",
                 "dialect",
                 "domain",
                 "duration_sec",
                 "num_samples",
+                "sample_rate",
             ],
         )
         writer.writeheader()
@@ -204,6 +209,84 @@ def decode_audio_record(audio: dict[str, Any], target_sample_rate: int) -> tuple
     return samples.astype(np.float32), int(sample_rate)
 
 
+def summarize_audio_record(audio: dict[str, Any]) -> dict[str, Any]:
+    summary: dict[str, Any] = {
+        "type": type(audio).__name__,
+        "keys": sorted(str(key) for key in audio.keys()),
+        "has_array": audio.get("array") is not None,
+        "has_bytes": audio.get("bytes") is not None,
+        "has_path": bool(audio.get("path")),
+    }
+    if audio.get("path"):
+        summary["path"] = str(audio.get("path"))
+    if audio.get("bytes") is not None:
+        summary["bytes_len"] = len(audio["bytes"])
+    if audio.get("sampling_rate") is not None:
+        summary["sampling_rate"] = int(audio["sampling_rate"])
+    return summary
+
+
+def run_one_row_probe(args: argparse.Namespace) -> None:
+    ds = load_dataset(
+        args.dataset_name,
+        split=args.probe_split,
+        streaming=True,
+        **build_hub_auth(args.token),
+    ).cast_column("audio", Audio(decode=False))
+
+    skip_reasons: defaultdict[str, int] = defaultdict(int)
+    for idx, row in enumerate(ds):
+        if args.probe_max_rows and idx >= args.probe_max_rows:
+            break
+
+        audio = row.get("audio")
+        if audio is None:
+            skip_reasons["missing_audio"] += 1
+            continue
+
+        text_raw, source_type = choose_text(row, include_unscripted=args.include_unscripted)
+        if not text_raw:
+            skip_reasons["missing_text"] += 1
+            continue
+
+        text = normalize_kikuyu_text(text_raw)
+        if not text:
+            skip_reasons["empty_text_after_normalize"] += 1
+            continue
+
+        result: dict[str, Any] = {
+            "event": "one_row_probe_ok",
+            "dataset_name": args.dataset_name,
+            "split": args.probe_split,
+            "idx": idx,
+            "text": text,
+            "text_len": len(text),
+            "source_type": source_type,
+            "speaker": safe_name(row.get("recorder_uuid"), "unknown_speaker"),
+            "dialect": safe_name(row.get("sentenceDialect"), "unknown_dialect"),
+            "domain": str(row.get("domain") or ""),
+            "mediaPathId": str(row.get("mediaPathId") or ""),
+            "audio": summarize_audio_record(audio),
+            "skip_reasons": dict(skip_reasons),
+        }
+
+        if args.probe_decode_audio:
+            samples, sample_rate = decode_audio_record(audio, args.target_sample_rate)
+            result["decoded_audio"] = {
+                "sample_rate": sample_rate,
+                "num_samples": int(len(samples)),
+                "duration_sec": round(float(len(samples) / sample_rate), 4) if sample_rate > 0 else 0.0,
+            }
+
+        print(json.dumps(result, indent=2, ensure_ascii=False), flush=True)
+        return
+
+    raise RuntimeError(
+        f"No usable row found in split {args.probe_split!r} after scanning "
+        f"{args.probe_max_rows or 'all'} rows. Skips: {dict(skip_reasons)}"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Prepare Anv-ke/kikuyu for MMS/fairseq TTS fine-tuning with normalized audio and manifests."
@@ -221,11 +304,28 @@ def main() -> None:
     parser.add_argument("--max-rows-per-split", type=int, default=0)
     parser.add_argument("--streaming", action="store_true")
     parser.add_argument(
+        "--probe-one-row",
+        action="store_true",
+        help="Stream one split, validate one audio/text row, print metadata, and exit before preparation.",
+    )
+    parser.add_argument("--probe-split", default="train")
+    parser.add_argument("--probe-max-rows", type=int, default=200)
+    parser.add_argument(
+        "--probe-decode-audio",
+        action="store_true",
+        help="Decode the probed row with ffmpeg to validate audio bytes. Omit for the cheapest metadata-only probe.",
+    )
+    parser.add_argument(
         "--token",
         default=None,
         help="HF token for gated datasets. Defaults to HF_TOKEN, HUGGING_FACE_HUB_TOKEN, then ~/.cache/huggingface/token.",
     )
     args = parser.parse_args()
+
+    if args.probe_one_row:
+        run_one_row_probe(args)
+        os._exit(0)
+        return
 
     output_dir = Path(args.output_dir).resolve()
     clips_dir = output_dir / "clips"
@@ -426,7 +526,9 @@ def main() -> None:
     }
     with (output_dir / "prep_stats.json").open("w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2, ensure_ascii=False)
-    print(json.dumps(stats, indent=2, ensure_ascii=False))
+    print(json.dumps(stats, indent=2, ensure_ascii=False), flush=True)
+    if args.streaming:
+        os._exit(0)
 
 
 if __name__ == "__main__":
