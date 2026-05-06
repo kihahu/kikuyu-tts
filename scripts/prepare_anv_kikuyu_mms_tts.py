@@ -389,15 +389,14 @@ def main() -> None:
         retries = 0
         split_done = False
         while not split_done:
+            if args.max_rows_per_split and written_for_split >= args.max_rows_per_split:
+                break
             ds = dataset[source_split].cast_column("audio", Audio(decode=False))
             if args.streaming and start_idx:
                 ds = ds.skip(start_idx)
             try:
                 for idx, row in enumerate(ds, start=start_idx):
                     start_idx = idx + 1
-                    if args.max_rows_per_split and written_for_split >= args.max_rows_per_split:
-                        split_done = True
-                        break
 
                     audio = row.get("audio")
                     if audio is None:
@@ -481,6 +480,9 @@ def main() -> None:
                             ),
                             flush=True,
                         )
+                    if args.max_rows_per_split and written_for_split >= args.max_rows_per_split:
+                        split_done = True
+                        break
                 else:
                     split_done = True
             except Exception as exc:
