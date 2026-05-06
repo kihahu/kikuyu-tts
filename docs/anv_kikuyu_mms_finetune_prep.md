@@ -175,6 +175,26 @@ python scripts/synthesize_mms_vits_checkpoint.py \
   --device cpu
 ```
 
+## Evaluation Notes
+
+Local ASR-proxy comparison artifacts were written under:
+
+```text
+artifacts/tts_eval/anv_comparison/
+```
+
+The five-prompt ASR proxy did not prove that the ANV checkpoints are better than Waxal `G_77100`:
+
+```text
+waxal_g77100 mean_cer_proxy:              0.2118
+anv_g4381800 mean_cer_proxy:              0.4822
+anv_g4381800 length_scale=1.4 proxy:      0.5829
+anv_g4381800 length_scale=1.8 proxy:      0.5405
+anv_lr1e6_cap1k_g890300 mean_cer_proxy:   0.5750
+```
+
+Treat this as a weak intelligibility proxy, not a final MOS score. The next useful gate is human listening on the matched WAVs before spending more GPU on larger ANV runs.
+
 ## Notes
 
 - The current ANV dataset splits are `train`, `validation`, and `test`; the prep maps them to `train`, `dev`, and `test` for VITS/fairseq compatibility.
