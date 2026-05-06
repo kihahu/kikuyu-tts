@@ -122,10 +122,10 @@ def write_vits_filelist(path: Path, rows: list[dict[str, Any]], root: Path) -> N
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         for row in rows:
-            rel = Path(row["audio_path"]).resolve().relative_to(root.resolve())
+            audio_path = Path(row["audio_path"]).resolve()
             text = str(row["text"]).replace("\n", " ").replace("|", " ")
             speaker_id = int(row["speaker_id"])
-            f.write(f"{rel.as_posix()}|{speaker_id}|{text}\n")
+            f.write(f"{audio_path.as_posix()}|{speaker_id}|{text}\n")
 
 
 def write_manifest_bundle(path_prefix: Path, rows: list[dict[str, Any]], root: Path) -> None:
