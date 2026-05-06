@@ -40,6 +40,7 @@ if [ "${ANV_SMOKE_ONLY:-0}" = "1" ]; then
   python scripts/prepare_anv_kikuyu_mms_tts.py \
     --dataset-name Anv-ke/kikuyu \
     --target-sample-rate 16000 \
+    --orthography "${ANV_ORTHOGRAPHY:-preserve}" \
     --probe-one-row \
     --probe-split "${ANV_PROBE_SPLIT:-train}" \
     --probe-max-rows "${ANV_PROBE_MAX_ROWS:-200}" \
@@ -60,6 +61,7 @@ python scripts/prepare_anv_kikuyu_mms_tts.py \
   --min-duration-sec "${ANV_MIN_DURATION_SEC:-1.0}" \
   --max-duration-sec "${ANV_MAX_DURATION_SEC:-15.0}" \
   --speaker-mode "${ANV_SPEAKER_MODE:-single_speaker}" \
+  --orthography "${ANV_ORTHOGRAPHY:-preserve}" \
   --max-rows-per-split "${ANV_MAX_ROWS_PER_SPLIT:-0}" \
   --stream-retries "${ANV_STREAM_RETRIES:-3}" \
   ${ANV_STREAMING:+--streaming}

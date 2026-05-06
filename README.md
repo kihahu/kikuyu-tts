@@ -74,7 +74,8 @@ python scripts/prepare_anv_kikuyu_mms_tts.py \
   --output-dir data/anv_kikuyu_mms_tts \
   --target-sample-rate 16000 \
   --min-duration-sec 1.0 \
-  --max-duration-sec 15.0
+  --max-duration-sec 15.0 \
+  --orthography preserve
 ```
 
 That produces fairseq-style manifests and normalized 16 kHz audio for the full MMS checkpoint route. See `docs/anv_kikuyu_mms_finetune_prep.md`.

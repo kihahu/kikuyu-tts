@@ -141,6 +141,15 @@ The launcher clones the official VITS repo if needed, builds monotonic alignment
 
 The first persisted ANV continuation run used 5,000 accepted rows per split in `single_speaker` mode, resumed from `kihahu/mms-tts-kik-waxal-v1` step `77100`, and uploaded artifacts to `kihahu/mms-tts-kik-waxal-anv-v1`.
 
+Human listening and the current proxy comparison still rank the Waxal continuation checkpoint as the best available sample set. Use Waxal `G_77100` as the default resume source for new ANV experiments unless the experiment is explicitly testing continued training from an ANV checkpoint:
+
+```bash
+--env KIK_TTS_RUN_NAME=mms_kik_waxal_anv_next_experiment \
+--env KIK_TTS_RESUME_REPO_ID=kihahu/mms-tts-kik-waxal-v1 \
+--env KIK_TTS_RESUME_RUN_NAME=mms_kik_waxal_single_speaker \
+--env KIK_TTS_RESUME_STEP=77100
+```
+
 Verified latest generator checkpoint:
 
 ```text
@@ -205,6 +214,15 @@ anv_lr1e6_cap1k_g890300 mean_cer_proxy:   0.5750
 ```
 
 Treat this as a weak intelligibility proxy, not a final MOS score. The next useful gate is human listening on the matched WAVs before spending more GPU on larger ANV runs.
+
+The ANV transcripts preserve Kikuyu diacritics by default. To test whether matching the ASCII style of the current Waxal/evaluation prompts improves adaptation, run a small separate experiment with:
+
+```bash
+--env ANV_ORTHOGRAPHY=strip_diacritics \
+--env KIK_TTS_RUN_NAME=mms_kik_waxal_anv_ascii_cap1k
+```
+
+Keep this as a separate run name so the resulting samples can be compared against `waxal_g77100`, which is still the best available reference.
 
 ## Notes
 

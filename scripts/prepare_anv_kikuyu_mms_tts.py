@@ -32,8 +32,14 @@ DEFAULT_SPLITS = ("train", "dev", "test")
 HF_TOKEN_CACHE_PATH = Path("~/.cache/huggingface/token").expanduser()
 
 
-def normalize_kikuyu_text(text: str) -> str:
+def strip_diacritics(text: str) -> str:
+    return "".join(char for char in unicodedata.normalize("NFKD", text) if not unicodedata.combining(char))
+
+
+def normalize_kikuyu_text(text: str, orthography: str = "preserve") -> str:
     text = unicodedata.normalize("NFKC", text or "")
+    if orthography == "strip_diacritics":
+        text = strip_diacritics(text)
     for src, dst in PUNCT_REPLACEMENTS.items():
         text = text.replace(src, dst)
     text = text.lower().strip()
@@ -250,7 +256,7 @@ def run_one_row_probe(args: argparse.Namespace) -> None:
             skip_reasons["missing_text"] += 1
             continue
 
-        text = normalize_kikuyu_text(text_raw)
+        text = normalize_kikuyu_text(text_raw, args.orthography)
         if not text:
             skip_reasons["empty_text_after_normalize"] += 1
             continue
@@ -299,6 +305,7 @@ def main() -> None:
     parser.add_argument("--max-duration-sec", type=float, default=15.0)
     parser.add_argument("--include-unscripted", action="store_true")
     parser.add_argument("--speaker-mode", choices=("all", "dominant_only", "single_speaker"), default="all")
+    parser.add_argument("--orthography", choices=("preserve", "strip_diacritics"), default="preserve")
     parser.add_argument("--train-split", default="train")
     parser.add_argument("--dev-split", default="validation")
     parser.add_argument("--test-split", default="test")
@@ -408,7 +415,7 @@ def main() -> None:
                         skip_reasons["missing_text"] += 1
                         continue
 
-                    text = normalize_kikuyu_text(text_raw)
+                    text = normalize_kikuyu_text(text_raw, args.orthography)
                     if not text:
                         skip_reasons["empty_text_after_normalize"] += 1
                         continue
@@ -551,6 +558,7 @@ def main() -> None:
         "split_map": split_map,
         "include_unscripted": bool(args.include_unscripted),
         "speaker_mode": args.speaker_mode,
+        "orthography": args.orthography,
         "sample_rate": args.target_sample_rate,
         "dominant_speaker": dominant_speaker,
         "total_rows": len(accepted_rows),
