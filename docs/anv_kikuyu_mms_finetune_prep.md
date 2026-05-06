@@ -156,6 +156,7 @@ mms_vits_finetune/vits/logs/mms_kik_waxal_anv_single_speaker/D_4381800.pth
 To continue from this ANV checkpoint instead of restarting from the Waxal checkpoint, pass:
 
 ```bash
+--env KIK_TTS_RUN_NAME=mms_kik_waxal_anv_next_experiment \
 --env KIK_TTS_RESUME_REPO_ID=kihahu/mms-tts-kik-waxal-anv-v1 \
 --env KIK_TTS_RESUME_RUN_NAME=mms_kik_waxal_anv_single_speaker \
 --env KIK_TTS_RESUME_STEP=4381800
