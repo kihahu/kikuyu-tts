@@ -13,13 +13,17 @@ fi
 
 if command -v apt-get >/dev/null 2>&1; then
   apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg git build-essential espeak-ng
+  if [ "${ANV_SMOKE_ONLY:-0}" = "1" ]; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg
+  else
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg git build-essential espeak-ng
+  fi
 fi
 
 python -m pip install --upgrade pip
-python -m pip install "torch>=2.3,<2.6" "huggingface_hub>=0.24.0" "datasets[audio]>=3.0.0,<4.0.0" soundfile pyyaml
 
 if [ "${ANV_SMOKE_ONLY:-0}" = "1" ]; then
+  python -m pip install "huggingface_hub>=0.24.0" "datasets>=3.0.0,<4.0.0" numpy soundfile
   PROBE_ARGS=()
   if [ "${ANV_SMOKE_DECODE_AUDIO:-0}" = "1" ]; then
     PROBE_ARGS+=(--probe-decode-audio)
@@ -36,6 +40,8 @@ if [ "${ANV_SMOKE_ONLY:-0}" = "1" ]; then
     "${PROBE_ARGS[@]}"
   exit 0
 fi
+
+python -m pip install "torch>=2.3,<2.6" "huggingface_hub>=0.24.0" "datasets[audio]>=3.0.0,<4.0.0" soundfile pyyaml
 
 python scripts/prepare_anv_kikuyu_mms_tts.py \
   --dataset-name Anv-ke/kikuyu \
