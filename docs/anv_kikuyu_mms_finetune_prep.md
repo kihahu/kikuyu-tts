@@ -137,6 +137,43 @@ bash artifacts/anv_kikuyu_mms_finetune/launch_finetune.sh
 
 The launcher clones the official VITS repo if needed, builds monotonic alignment, stages the MMS full checkpoint into the VITS `logs/<run_name>` directory, and starts `train_ms.py`.
 
+## Latest ANV Continuation Checkpoint
+
+The first persisted ANV continuation run used 5,000 accepted rows per split in `single_speaker` mode, resumed from `kihahu/mms-tts-kik-waxal-v1` step `77100`, and uploaded artifacts to `kihahu/mms-tts-kik-waxal-anv-v1`.
+
+Verified latest generator checkpoint:
+
+```text
+mms_vits_finetune/vits/logs/mms_kik_waxal_anv_single_speaker/G_4381800.pth
+```
+
+Matching discriminator checkpoint:
+
+```text
+mms_vits_finetune/vits/logs/mms_kik_waxal_anv_single_speaker/D_4381800.pth
+```
+
+To continue from this ANV checkpoint instead of restarting from the Waxal checkpoint, pass:
+
+```bash
+--env KIK_TTS_RESUME_REPO_ID=kihahu/mms-tts-kik-waxal-anv-v1 \
+--env KIK_TTS_RESUME_RUN_NAME=mms_kik_waxal_anv_single_speaker \
+--env KIK_TTS_RESUME_STEP=4381800
+```
+
+The checkpoint was smoke-tested locally with:
+
+```bash
+python scripts/synthesize_mms_vits_checkpoint.py \
+  --repo-id kihahu/mms-tts-kik-waxal-anv-v1 \
+  --checkpoint mms_vits_finetune/vits/logs/mms_kik_waxal_anv_single_speaker/G_4381800.pth \
+  --config mms_vits_finetune/vits/logs/mms_kik_waxal_anv_single_speaker/config.json \
+  --vocab mms_vits_finetune/vits/logs/mms_kik_waxal_anv_single_speaker/vocab.txt \
+  --text 'Ni wega gukwona umuthi.' \
+  --output artifacts/tts_eval/anv_g4381800_smoke.wav \
+  --device cpu
+```
+
 ## Notes
 
 - The current ANV dataset splits are `train`, `validation`, and `test`; the prep maps them to `train`, `dev`, and `test` for VITS/fairseq compatibility.
