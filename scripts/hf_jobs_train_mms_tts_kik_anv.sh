@@ -61,6 +61,7 @@ python scripts/prepare_anv_kikuyu_mms_tts.py \
   --max-duration-sec "${ANV_MAX_DURATION_SEC:-15.0}" \
   --speaker-mode "${ANV_SPEAKER_MODE:-single_speaker}" \
   --max-rows-per-split "${ANV_MAX_ROWS_PER_SPLIT:-0}" \
+  --stream-retries "${ANV_STREAM_RETRIES:-3}" \
   ${ANV_STREAMING:+--streaming}
 
 if [ "$ANV_PREP_ONLY" = "1" ]; then

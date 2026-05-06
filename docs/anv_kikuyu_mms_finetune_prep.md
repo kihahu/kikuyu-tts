@@ -81,6 +81,7 @@ Bounded prep-only job:
 hf jobs run --detach --flavor cpu-basic --timeout 30m --secrets HF_TOKEN \
   --env ANV_PREP_ONLY=1 \
   --env ANV_STREAMING=1 \
+  --env ANV_STREAM_RETRIES=5 \
   --env ANV_MAX_ROWS_PER_SPLIT=1 \
   python:3.10 \
   'git clone https://github.com/kihahu/kikuyu-tts.git /workspace/kikuyu-tts && bash /workspace/kikuyu-tts/scripts/hf_jobs_train_mms_tts_kik_anv.sh /workspace/kikuyu-tts'

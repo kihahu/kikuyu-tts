@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import unicodedata
 from collections import defaultdict
 from pathlib import Path
@@ -304,6 +305,12 @@ def main() -> None:
     parser.add_argument("--max-rows-per-split", type=int, default=0)
     parser.add_argument("--streaming", action="store_true")
     parser.add_argument(
+        "--stream-retries",
+        type=int,
+        default=3,
+        help="Retry streaming split iteration after transient Hub/network read failures.",
+    )
+    parser.add_argument(
         "--probe-one-row",
         action="store_true",
         help="Stream one split, validate one audio/text row, print metadata, and exit before preparation.",
@@ -377,94 +384,125 @@ def main() -> None:
             ),
             flush=True,
         )
-        ds = dataset[source_split].cast_column("audio", Audio(decode=False))
         written_for_split = 0
-        for idx, row in enumerate(ds):
-            if args.max_rows_per_split and written_for_split >= args.max_rows_per_split:
-                break
-
-            audio = row.get("audio")
-            if audio is None:
-                skip_reasons["missing_audio"] += 1
-                continue
-
-            text_raw, source_type = choose_text(row, include_unscripted=args.include_unscripted)
-            if not text_raw:
-                skip_reasons["missing_text"] += 1
-                continue
-
-            text = normalize_kikuyu_text(text_raw)
-            if not text:
-                skip_reasons["empty_text_after_normalize"] += 1
-                continue
-
+        start_idx = 0
+        retries = 0
+        split_done = False
+        while not split_done:
+            ds = dataset[source_split].cast_column("audio", Audio(decode=False))
+            if args.streaming and start_idx:
+                ds = ds.skip(start_idx)
             try:
-                samples, sample_rate = decode_audio_record(audio, args.target_sample_rate)
+                for idx, row in enumerate(ds, start=start_idx):
+                    start_idx = idx + 1
+                    if args.max_rows_per_split and written_for_split >= args.max_rows_per_split:
+                        split_done = True
+                        break
+
+                    audio = row.get("audio")
+                    if audio is None:
+                        skip_reasons["missing_audio"] += 1
+                        continue
+
+                    text_raw, source_type = choose_text(row, include_unscripted=args.include_unscripted)
+                    if not text_raw:
+                        skip_reasons["missing_text"] += 1
+                        continue
+
+                    text = normalize_kikuyu_text(text_raw)
+                    if not text:
+                        skip_reasons["empty_text_after_normalize"] += 1
+                        continue
+
+                    try:
+                        samples, sample_rate = decode_audio_record(audio, args.target_sample_rate)
+                    except Exception as exc:
+                        skip_reasons["audio_decode_failed"] += 1
+                        print(
+                            json.dumps(
+                                {
+                                    "event": "audio_decode_failed",
+                                    "source_split": source_split,
+                                    "output_split": output_split,
+                                    "idx": idx,
+                                    "error": str(exc),
+                                },
+                                ensure_ascii=False,
+                            ),
+                            flush=True,
+                        )
+                        continue
+                    duration_sec = float(len(samples) / sample_rate) if sample_rate > 0 else 0.0
+                    if duration_sec < args.min_duration_sec:
+                        skip_reasons["too_short"] += 1
+                        continue
+                    if duration_sec > args.max_duration_sec:
+                        skip_reasons["too_long"] += 1
+                        continue
+
+                    speaker = safe_name(row.get("recorder_uuid"), "unknown_speaker")
+                    speaker_counts[speaker] += 1
+
+                    dialect = safe_name(row.get("sentenceDialect"), "unknown_dialect")
+                    uid = safe_name(row.get("mediaPathId"), f"{output_split}_{idx:07d}")
+                    utt_id = f"{output_split}_{uid}"
+                    rel_path = Path("clips") / output_split / speaker / f"{utt_id}.wav"
+                    abs_path = output_dir / rel_path
+                    abs_path.parent.mkdir(parents=True, exist_ok=True)
+                    sf.write(abs_path, samples, sample_rate, subtype="PCM_16")
+
+                    accepted_rows.append(
+                        {
+                            "utt_id": utt_id,
+                            "audio_path": str(abs_path),
+                            "text": text,
+                            "speaker": speaker,
+                            "split": output_split,
+                            "source_split": source_split,
+                            "source_type": source_type,
+                            "dialect": dialect,
+                            "domain": str(row.get("domain") or ""),
+                            "duration_sec": round(duration_sec, 4),
+                            "num_samples": int(len(samples)),
+                            "sample_rate": sample_rate,
+                        }
+                    )
+                    written_for_split += 1
+                    if written_for_split == 1 or written_for_split % 500 == 0:
+                        print(
+                            json.dumps(
+                                {
+                                    "event": "accepted_rows",
+                                    "source_split": source_split,
+                                    "output_split": output_split,
+                                    "count": written_for_split,
+                                },
+                                ensure_ascii=False,
+                            ),
+                            flush=True,
+                        )
+                else:
+                    split_done = True
             except Exception as exc:
-                skip_reasons["audio_decode_failed"] += 1
+                if not args.streaming or retries >= args.stream_retries:
+                    raise
+                retries += 1
                 print(
                     json.dumps(
                         {
-                            "event": "audio_decode_failed",
+                            "event": "stream_retry",
                             "source_split": source_split,
                             "output_split": output_split,
-                            "idx": idx,
+                            "retry": retries,
+                            "next_idx": start_idx,
+                            "accepted": written_for_split,
                             "error": str(exc),
                         },
                         ensure_ascii=False,
                     ),
                     flush=True,
                 )
-                continue
-            duration_sec = float(len(samples) / sample_rate) if sample_rate > 0 else 0.0
-            if duration_sec < args.min_duration_sec:
-                skip_reasons["too_short"] += 1
-                continue
-            if duration_sec > args.max_duration_sec:
-                skip_reasons["too_long"] += 1
-                continue
-
-            speaker = safe_name(row.get("recorder_uuid"), "unknown_speaker")
-            speaker_counts[speaker] += 1
-
-            dialect = safe_name(row.get("sentenceDialect"), "unknown_dialect")
-            uid = safe_name(row.get("mediaPathId"), f"{output_split}_{idx:07d}")
-            utt_id = f"{output_split}_{uid}"
-            rel_path = Path("clips") / output_split / speaker / f"{utt_id}.wav"
-            abs_path = output_dir / rel_path
-            abs_path.parent.mkdir(parents=True, exist_ok=True)
-            sf.write(abs_path, samples, sample_rate, subtype="PCM_16")
-
-            accepted_rows.append(
-                {
-                    "utt_id": utt_id,
-                    "audio_path": str(abs_path),
-                    "text": text,
-                    "speaker": speaker,
-                    "split": output_split,
-                    "source_split": source_split,
-                    "source_type": source_type,
-                    "dialect": dialect,
-                    "domain": str(row.get("domain") or ""),
-                    "duration_sec": round(duration_sec, 4),
-                    "num_samples": int(len(samples)),
-                    "sample_rate": sample_rate,
-                }
-            )
-            written_for_split += 1
-            if written_for_split == 1 or written_for_split % 500 == 0:
-                print(
-                    json.dumps(
-                        {
-                            "event": "accepted_rows",
-                            "source_split": source_split,
-                            "output_split": output_split,
-                            "count": written_for_split,
-                        },
-                        ensure_ascii=False,
-                    ),
-                    flush=True,
-                )
+                time.sleep(min(30, 2**retries))
         print(
             json.dumps(
                 {
