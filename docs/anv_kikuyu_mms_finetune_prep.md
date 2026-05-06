@@ -87,6 +87,18 @@ hf jobs run --detach --flavor cpu-basic --timeout 30m --secrets HF_TOKEN \
   'git clone https://github.com/kihahu/kikuyu-tts.git /workspace/kikuyu-tts && bash /workspace/kikuyu-tts/scripts/hf_jobs_train_mms_tts_kik_anv.sh /workspace/kikuyu-tts'
 ```
 
+Bootstrap-only checkpoint/resume gate:
+
+```bash
+hf jobs run --detach --flavor cpu-upgrade --timeout 2h --secrets HF_TOKEN \
+  --env ANV_BOOTSTRAP_ONLY=1 \
+  --env ANV_STREAMING=1 \
+  --env ANV_STREAM_RETRIES=8 \
+  --env ANV_MAX_ROWS_PER_SPLIT=1 \
+  python:3.10 \
+  'git clone https://github.com/kihahu/kikuyu-tts.git /workspace/kikuyu-tts && bash /workspace/kikuyu-tts/scripts/hf_jobs_train_mms_tts_kik_anv.sh /workspace/kikuyu-tts'
+```
+
 ## Next Step: Full MMS Checkpoint
 
 For actual fine-tuning, do not use only the Hugging Face inference checkpoint. Use the full MMS Kikuyu checkpoint instead:

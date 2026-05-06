@@ -104,6 +104,10 @@ python scripts/bootstrap_mms_kikuyu_tts_finetune.py \
   --download-checkpoint \
   "${BOOTSTRAP_ARGS[@]}"
 
+if [ "${ANV_BOOTSTRAP_ONLY:-0}" = "1" ]; then
+  exit 0
+fi
+
 readarray -t HUB_CONFIG < <(CONFIG_PATH="$CONFIG_PATH" python - <<'PY'
 import os
 import yaml
