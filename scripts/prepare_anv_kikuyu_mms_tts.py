@@ -6,6 +6,9 @@ import csv
 import json
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 import unicodedata
 from collections import defaultdict
 from pathlib import Path
@@ -144,6 +147,63 @@ def write_manifest_bundle(path_prefix: Path, rows: list[dict[str, Any]], root: P
             lang_f.write("kik 1\n")
 
 
+def require_command(name: str) -> None:
+    if shutil.which(name) is None:
+        raise RuntimeError(f"`{name}` is required on PATH.")
+
+
+def decode_audio_record(audio: dict[str, Any], target_sample_rate: int) -> tuple[np.ndarray, int]:
+    if "array" in audio and audio["array"] is not None:
+        samples = np.asarray(audio["array"], dtype=np.float32)
+        if samples.ndim == 2:
+            samples = samples.mean(axis=1)
+        return samples, int(audio["sampling_rate"])
+
+    require_command("ffmpeg")
+    source_path = audio.get("path")
+    suffix = Path(str(source_path or "audio.bin")).suffix or ".bin"
+    with tempfile.TemporaryDirectory(prefix="anv-audio-decode-") as tmp:
+        tmp_dir = Path(tmp)
+        input_path = tmp_dir / f"input{suffix}"
+        output_path = tmp_dir / "output.wav"
+        raw_bytes = audio.get("bytes")
+        if raw_bytes is not None:
+            input_path.write_bytes(raw_bytes)
+        elif source_path:
+            input_path = Path(source_path)
+        else:
+            raise ValueError("Audio record has neither decoded array, bytes, nor path.")
+
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                str(input_path),
+                "-vn",
+                "-ac",
+                "1",
+                "-ar",
+                str(target_sample_rate),
+                "-f",
+                "wav",
+                str(output_path),
+            ],
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg failed to decode ANV audio payload from {source_path or '<bytes>'}")
+
+        samples, sample_rate = sf.read(str(output_path), always_2d=False)
+    if samples.ndim == 2:
+        samples = samples.mean(axis=1)
+    return samples.astype(np.float32), int(sample_rate)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Prepare Anv-ke/kikuyu for MMS/fairseq TTS fine-tuning with normalized audio and manifests."
@@ -217,7 +277,7 @@ def main() -> None:
             ),
             flush=True,
         )
-        ds = dataset[source_split].cast_column("audio", Audio(sampling_rate=args.target_sample_rate))
+        ds = dataset[source_split].cast_column("audio", Audio(decode=False))
         written_for_split = 0
         for idx, row in enumerate(ds):
             if args.max_rows_per_split and written_for_split >= args.max_rows_per_split:
@@ -238,10 +298,24 @@ def main() -> None:
                 skip_reasons["empty_text_after_normalize"] += 1
                 continue
 
-            samples = np.asarray(audio["array"], dtype=np.float32)
-            if samples.ndim == 2:
-                samples = samples.mean(axis=1)
-            sample_rate = int(audio["sampling_rate"])
+            try:
+                samples, sample_rate = decode_audio_record(audio, args.target_sample_rate)
+            except Exception as exc:
+                skip_reasons["audio_decode_failed"] += 1
+                print(
+                    json.dumps(
+                        {
+                            "event": "audio_decode_failed",
+                            "source_split": source_split,
+                            "output_split": output_split,
+                            "idx": idx,
+                            "error": str(exc),
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+                continue
             duration_sec = float(len(samples) / sample_rate) if sample_rate > 0 else 0.0
             if duration_sec < args.min_duration_sec:
                 skip_reasons["too_short"] += 1
