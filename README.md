@@ -23,6 +23,46 @@ This trains `facebook/mms-1b-all` with the Kikuyu MMS head (`kik`) on the paired
 
 ## Recommended Workflow
 
+### English To Kikuyu Audio
+
+The first end-to-end app surface is a script. It translates English text to Kikuyu with NLLB, then synthesizes Kikuyu audio with the current best Waxal MMS/VITS checkpoint, `G_77100`.
+
+Smoke test the Waxal audio path with known Kikuyu text:
+
+```bash
+python scripts/english_to_kikuyu_audio.py \
+  --translation-backend identity \
+  --text "Ni wega gukwona umuthi." \
+  --output-wav artifacts/english_to_kikuyu_audio/smoke_identity.wav
+```
+
+Run English text through translation and TTS:
+
+```bash
+python scripts/english_to_kikuyu_audio.py \
+  --input path/to/shakespeare_chapter.txt \
+  --output-wav artifacts/english_to_kikuyu_audio/shakespeare_chapter.wav \
+  --translated-output artifacts/english_to_kikuyu_audio/shakespeare_chapter.kik.txt \
+  --manifest-json artifacts/english_to_kikuyu_audio/shakespeare_chapter.manifest.json \
+  --translation-device cpu \
+  --tts-device cpu
+```
+
+The compatibility wrapper `scripts/pipeline.py` calls the same implementation:
+
+```bash
+python scripts/pipeline.py \
+  --input path/to/shakespeare_chapter.txt \
+  --output-wav artifacts/english_to_kikuyu_audio/shakespeare_chapter.wav
+```
+
+Default TTS checkpoint:
+
+```text
+kihahu/mms-tts-kik-waxal-v1
+mms_vits_finetune/vits/logs/mms_kik_waxal_single_speaker/G_77100.pth
+```
+
 1. Prepare Waxal manifests with `scripts/prepare_waxal_kik_tts.py`. This writes JSONL, fairseq-style bundles, and VITS filelists for both all-speaker and dominant single-speaker training.
 2. For a real MMS fine-tune, bootstrap the full-checkpoint continuation run:
 

@@ -14,70 +14,45 @@ def run(command: list[str]) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run full English->Kikuyu text+audio pipeline.")
-    parser.add_argument("--input", required=True)
-    parser.add_argument("--translated-output", default="artifacts/kikuyu_translated.txt")
-    parser.add_argument("--chunk-json", default="artifacts/kikuyu_chunks.json")
-    parser.add_argument("--audio-output-dir", default="artifacts/audio")
-    parser.add_argument("--model", default="facebook/mms-tts-kik", help="TTS model path or HF repo id")
-    parser.add_argument("--quantized-model-dir", default="models/mms-tts-kik-quantized")
-    parser.add_argument("--quantize-first", action="store_true", help="Quantize model before synthesis.")
-    parser.add_argument("--quantize-dtype", default="float16", choices=["float16", "int8"])
-    parser.add_argument("--voice", default="")
-    parser.add_argument("--audio-format", default="wav", choices=["wav", "mp3"])
+    parser = argparse.ArgumentParser(
+        description="Compatibility wrapper for English text -> Kikuyu text -> Waxal G_77100 audio."
+    )
+    parser.add_argument("--input", required=True, help="UTF-8 English input file.")
+    parser.add_argument("--output-wav", default="artifacts/english_to_kikuyu_audio/output.wav")
+    parser.add_argument("--translated-output", default="artifacts/english_to_kikuyu_audio/kikuyu.txt")
+    parser.add_argument("--manifest-json", default="artifacts/english_to_kikuyu_audio/manifest.json")
+    parser.add_argument("--chunk-wav-dir", default="artifacts/english_to_kikuyu_audio/chunks")
+    parser.add_argument("--max-chunks", type=int, default=0)
+    parser.add_argument("--translation-backend", choices=("nllb", "identity"), default="nllb")
+    parser.add_argument("--translation-device", default="auto", choices=("auto", "cpu", "cuda", "mps"))
+    parser.add_argument("--tts-device", default="cpu", choices=("auto", "cpu", "cuda", "mps"))
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
-    translate_script = root / "scripts" / "translate_book.py"
-    synth_script = root / "scripts" / "synthesize_book.py"
-    quantize_script = root / "scripts" / "quantize_mms_tts.py"
-
-    model_for_synthesis = args.model
-    quantized_dir = Path(args.quantized_model_dir)
-    if args.quantize_first:
-        run(
-            [
-                sys.executable,
-                str(quantize_script),
-                "--model",
-                args.model,
-                "--output-dir",
-                str(quantized_dir),
-                "--dtype",
-                args.quantize_dtype,
-            ]
-        )
-        model_for_synthesis = str(quantized_dir)
-    elif quantized_dir.exists():
-        model_for_synthesis = str(quantized_dir)
-
-    run(
-        [
-            sys.executable,
-            str(translate_script),
-            "--input",
-            args.input,
-            "--output",
-            args.translated_output,
-            "--sidecar-json",
-            args.chunk_json,
-        ]
-    )
-    synth_cmd = [
+    pipeline_script = root / "scripts" / "english_to_kikuyu_audio.py"
+    command = [
         sys.executable,
-        str(synth_script),
+        str(pipeline_script),
         "--input",
+        args.input,
+        "--output-wav",
+        args.output_wav,
+        "--translated-output",
         args.translated_output,
-        "--model",
-        model_for_synthesis,
-        "--output-dir",
-        args.audio_output_dir,
-        "--format",
-        args.audio_format,
+        "--manifest-json",
+        args.manifest_json,
+        "--chunk-wav-dir",
+        args.chunk_wav_dir,
+        "--translation-backend",
+        args.translation_backend,
+        "--translation-device",
+        args.translation_device,
+        "--tts-device",
+        args.tts_device,
     ]
-    if args.voice:
-        synth_cmd.extend(["--voice", args.voice])
-    run(synth_cmd)
+    if args.max_chunks:
+        command.extend(["--max-chunks", str(args.max_chunks)])
+    run(command)
 
 
 if __name__ == "__main__":
