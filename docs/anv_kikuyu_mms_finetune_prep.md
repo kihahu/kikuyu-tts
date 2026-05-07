@@ -261,6 +261,31 @@ The HF Jobs ANV wrapper supports an opt-in mixed-data run. It prepares Waxal in 
 
 Keep `ANV_MAX_ROWS_PER_SPLIT=1000` for the first mixed run, and stop after the first uploaded checkpoint pair if proxy/listening does not improve. The goal of this run is not more ANV exposure; it is testing whether Waxal anchoring prevents the rapid degradation seen in pure ANV continuation.
 
+The first mixed Waxal+ANV run was launched as HF Job `69fc49d5aff1cd33e8f2f305` and canceled after the first useful checkpoint pair uploaded:
+
+```text
+mms_vits_finetune/vits/logs/mms_kik_waxal_anv_mixed_ascii_cap1k/G_511800.pth
+mms_vits_finetune/vits/logs/mms_kik_waxal_anv_mixed_ascii_cap1k/D_511800.pth
+```
+
+Local comparison artifacts were added under `artifacts/tts_eval/anv_comparison/`:
+
+```text
+mixed_ascii_cap1k_g511800_manifest.csv
+mixed_ascii_cap1k_g511800_asr_proxy.csv
+p01..p05_anv_mixed_ascii_cap1k_g511800.wav
+```
+
+The mixed-anchor run did not preserve Waxal quality. Its generated clips were much shorter than the Waxal references for the same prompts, and the five-prompt ASR proxy was substantially worse:
+
+```text
+waxal_g77100 mean_cer_proxy:                    0.2118
+anv_ascii_cap1k_g462600 mean_cer_proxy:         0.2644
+anv_mixed_ascii_cap1k_g511800 mean_cer_proxy:   1.3664
+```
+
+Do not continue this mixed run. The current best checkpoint remains Waxal `G_77100`. Any next ANV experiment should change the data selection or training objective, not just spend more steps on this schedule.
+
 ## Notes
 
 - The current ANV dataset splits are `train`, `validation`, and `test`; the prep maps them to `train`, `dev`, and `test` for VITS/fairseq compatibility.
