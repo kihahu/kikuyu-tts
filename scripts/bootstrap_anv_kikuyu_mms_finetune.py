@@ -74,15 +74,17 @@ def main() -> None:
 
     speaker_map = load_json(speaker_map_path)
     prep_stats = load_json(prep_stats_path)
-    num_speakers = len(speaker_map)
+    dataset_speakers = len(speaker_map)
+    vits_n_speakers = 0 if dataset_speakers <= 1 else dataset_speakers
 
     checkpoint_archive = output_dir / "downloads" / "kik_full_model.tar.gz"
-    checkpoint_dir = output_dir / "base_checkpoint" / "kik"
+    checkpoint_parent = output_dir / "base_checkpoint"
+    checkpoint_dir = checkpoint_parent / "kik"
     if args.download_checkpoint:
         download_file(args.checkpoint_url, checkpoint_archive)
-        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        checkpoint_parent.mkdir(parents=True, exist_ok=True)
         with tarfile.open(checkpoint_archive, "r:gz") as tar:
-            tar.extractall(checkpoint_dir)
+            tar.extractall(checkpoint_parent)
 
     ensure_file(checkpoint_dir / "G_100000.pth", "MMS generator checkpoint")
     ensure_file(checkpoint_dir / "D_100000.pth", "MMS discriminator checkpoint")
@@ -99,7 +101,7 @@ def main() -> None:
     patch_nested(patched_config, ["train", "fp16_run"], True)
     patch_nested(patched_config, ["train", "learning_rate"], 0.00005)
     patch_nested(patched_config, ["train", "epochs"], 10000)
-    patch_nested(patched_config, ["model", "n_speakers"], num_speakers)
+    patch_nested(patched_config, ["data", "n_speakers"], vits_n_speakers)
 
     config_out = output_dir / "generated_config" / f"{args.run_name}.json"
     write_json(config_out, patched_config)
@@ -122,13 +124,75 @@ def main() -> None:
                 '  git clone https://github.com/jaywalnut310/vits.git "$VITS_REPO"',
                 "fi",
                 'cd "$VITS_REPO"',
-                "pip install -r requirements.txt",
-                'cd monotonic_align && python setup.py build_ext --inplace && cd ..',
+                'python - <<\'PY\'',
+                "from pathlib import Path",
+                "path = Path('train_ms.py')",
+                "text = path.read_text(encoding='utf-8')",
+                "text = text.replace(\"os.environ['MASTER_PORT'] = '80000'\", \"os.environ['MASTER_PORT'] = '29500'\")",
+                "path.write_text(text, encoding='utf-8')",
+                "symbols_path = Path('text/symbols.py')",
+                "symbols_path.write_text(",
+                "    \"import os\\n\"",
+                "    \"vocab_file = os.environ.get('MMS_VOCAB_FILE')\\n\"",
+                "    \"if vocab_file:\\n\"",
+                "    \"    with open(vocab_file, encoding='utf-8') as f:\\n\"",
+                "    \"        symbols = [line.rstrip('\\\\n') for line in f]\\n\"",
+                "    \"else:\\n\"",
+                "    \"    _pad = '_'\\n\"",
+                "    \"    _punctuation = ';:,.!?¡¿—…\\\\\\\"«»“” '\\n\"",
+                "    \"    _letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'\\n\"",
+                "    \"    _letters_ipa = \\\"ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜɨɪʝɭɬɫɮʟɱɯɰŋɳɲɴøɵɸθœɶʘɹɺɾɻʀʁɽʂʃʈʧʉʊʋⱱʌɣɤʍχʎʏʑʐʒʔʡʕʢǀǁǂǃˈˌːˑʼʴʰʱʲʷˠˤ˞↓↑→↗↘'̩'ᵻ\\\"\\n\"",
+                "    \"    symbols = [_pad] + list(_punctuation) + list(_letters) + list(_letters_ipa)\\n\"",
+                "    \"SPACE_ID = symbols.index(' ') if ' ' in symbols else 0\\n\",",
+                "    encoding='utf-8',",
+                ")",
+                "text_init_path = Path('text/__init__.py')",
+                "text_init = text_init_path.read_text(encoding='utf-8')",
+                "text_init = text_init.replace('symbol_id = _symbol_to_id[symbol]\\n    sequence += [symbol_id]', 'symbol_id = _symbol_to_id.get(symbol)\\n    if symbol_id is not None:\\n      sequence += [symbol_id]')",
+                "text_init = text_init.replace('sequence = [_symbol_to_id[symbol] for symbol in cleaned_text]', 'sequence = [_symbol_to_id[symbol] for symbol in cleaned_text if symbol in _symbol_to_id]')",
+                "text_init_path.write_text(text_init, encoding='utf-8')",
+                "mel_path = Path('mel_processing.py')",
+                "mel_text = mel_path.read_text(encoding='utf-8')",
+                "mel_text = mel_text.replace(",
+                "    \"center=center, pad_mode='reflect', normalized=False, onesided=True)\",",
+                "    \"center=center, pad_mode='reflect', normalized=False, onesided=True, return_complex=False)\",",
+                ")",
+                "mel_text = mel_text.replace(",
+                "    \"mel = librosa_mel_fn(sampling_rate, n_fft, num_mels, fmin, fmax)\",",
+                "    \"mel = librosa_mel_fn(sr=sampling_rate, n_fft=n_fft, n_mels=num_mels, fmin=fmin, fmax=fmax)\",",
+                ")",
+                "mel_path.write_text(mel_text, encoding='utf-8')",
+                "utils_path = Path('utils.py')",
+                "utils_text = utils_path.read_text(encoding='utf-8')",
+                "utils_text = utils_text.replace(",
+                "    \"data = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')\\n  data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))\",",
+                "    \"data = np.asarray(fig.canvas.buffer_rgba(), dtype=np.uint8)[..., :3].copy()\",",
+                ")",
+                "utils_path.write_text(utils_text, encoding='utf-8')",
+                "setup_path = Path('monotonic_align/setup.py')",
+                "setup_path.write_text(",
+                "    \"from distutils.core import setup\\n\"",
+                "    \"from Cython.Build import cythonize\\n\"",
+                "    \"import numpy\\n\\n\"",
+                "    \"setup(\\n\"",
+                "    \"  name='monotonic_align',\\n\"",
+                "    \"  ext_modules=cythonize('core.pyx'),\\n\"",
+                "    \"  include_dirs=[numpy.get_include()]\\n\"",
+                "    \")\\n\",",
+                "    encoding='utf-8',",
+                ")",
+                "nested_align = Path('monotonic_align/monotonic_align')",
+                "nested_align.mkdir(parents=True, exist_ok=True)",
+                "(nested_align / '__init__.py').write_text('', encoding='utf-8')",
+                "PY",
+                "pip install Cython 'librosa>=0.10.1' matplotlib phonemizer scipy tensorboard Unidecode",
+                "(cd monotonic_align && python setup.py build_ext --inplace)",
                 'mkdir -p "logs/$RUN_NAME"',
                 'cp "$BASE_CKPT_DIR/G_100000.pth" "logs/$RUN_NAME/G_100000.pth"',
                 'cp "$BASE_CKPT_DIR/D_100000.pth" "logs/$RUN_NAME/D_100000.pth"',
                 'cp "$BASE_CKPT_DIR/vocab.txt" "logs/$RUN_NAME/vocab.txt"',
                 'cp "$CONFIG_PATH" "logs/$RUN_NAME/config.json"',
+                'export MMS_VOCAB_FILE="$BASE_CKPT_DIR/vocab.txt"',
                 'python train_ms.py -c "$CONFIG_PATH" -m "$RUN_NAME"',
                 "",
             ]
@@ -143,7 +207,8 @@ def main() -> None:
         "checkpoint_dir": str(checkpoint_dir),
         "generated_config": str(config_out),
         "launch_script": str(launch_script),
-        "num_speakers": num_speakers,
+        "dataset_speakers": dataset_speakers,
+        "vits_n_speakers": vits_n_speakers,
         "run_name": args.run_name,
         "notes": [
             "This bootstraps fine-tuning with the official VITS training code and the full MMS Kikuyu checkpoint.",

@@ -172,12 +172,57 @@ def write_coqui_pipe_manifest(path: Path, rows: list[dict[str, Any]], repo_root:
             f.write(f"{rel.as_posix()}|{t}|{spk}\n")
 
 
+def write_vits_filelist(path: Path, rows: list[dict[str, Any]], root: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        for row in rows:
+            audio_path = Path(row["audio_path"]).resolve()
+            text = str(row["text"]).replace("\n", " ").replace("|", " ")
+            speaker_id = int(row["speaker_id"])
+            f.write(f"{audio_path.as_posix()}|{speaker_id}|{text}\n")
+
+
+def write_manifest_bundle(path_prefix: Path, rows: list[dict[str, Any]], root: Path) -> None:
+    path_prefix.parent.mkdir(parents=True, exist_ok=True)
+    tsv_path = path_prefix.with_suffix(".tsv")
+    txt_path = path_prefix.with_suffix(".txt")
+    uid_path = path_prefix.with_suffix(".uid")
+    spk_path = path_prefix.with_suffix(".spk")
+    lang_path = path_prefix.with_suffix(".lang")
+
+    with (
+        tsv_path.open("w", encoding="utf-8") as tsv_f,
+        txt_path.open("w", encoding="utf-8") as txt_f,
+        uid_path.open("w", encoding="utf-8") as uid_f,
+        spk_path.open("w", encoding="utf-8") as spk_f,
+        lang_path.open("w", encoding="utf-8") as lang_f,
+    ):
+        tsv_f.write(f"{root.resolve().as_posix()}\n")
+        for row in rows:
+            rel = Path(row["audio_path"]).resolve().relative_to(root.resolve())
+            tsv_f.write(f"{rel.as_posix()}\t{row['num_samples']}\n")
+            txt_f.write(f"{row['text']}\n")
+            uid_f.write(f"{row['utt_id']}\n")
+            spk_f.write(f"{row['speaker']}\n")
+            lang_f.write("kik 1\n")
+
+
 def write_manifest_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(
             f,
-            fieldnames=["audio_path", "text", "speaker", "duration_sec", "sample_rate", "rms"],
+            fieldnames=[
+                "utt_id",
+                "audio_path",
+                "text",
+                "speaker",
+                "speaker_id",
+                "duration_sec",
+                "sample_rate",
+                "num_samples",
+                "rms",
+            ],
         )
         writer.writeheader()
         writer.writerows(rows)
@@ -216,8 +261,10 @@ def main() -> None:
     output_dir = Path(args.output_dir).resolve()
     clips_dir = output_dir / "clips"
     manifests_dir = output_dir / "manifests"
+    filelists_dir = output_dir / "filelists"
     clips_dir.mkdir(parents=True, exist_ok=True)
     manifests_dir.mkdir(parents=True, exist_ok=True)
+    filelists_dir.mkdir(parents=True, exist_ok=True)
 
     dataset: DatasetDict | Any = load_dataset(cfg.dataset_name, cfg.dataset_config)
     if cfg.split not in dataset:
@@ -264,14 +311,17 @@ def main() -> None:
         rel_path = Path("clips") / f"{speaker}_{idx:07d}.wav"
         abs_path = output_dir / rel_path
         sf.write(abs_path, samples, sample_rate, subtype="PCM_16")
+        utt_id = f"waxal_{idx:07d}"
 
         rows.append(
             {
+                "utt_id": utt_id,
                 "audio_path": str(abs_path),
                 "text": text,
                 "speaker": speaker,
                 "duration_sec": round(duration_sec, 4),
                 "sample_rate": sample_rate,
+                "num_samples": int(len(samples)),
                 "rms": round(rms, 6),
             }
         )
@@ -286,6 +336,10 @@ def main() -> None:
         seed=cfg.seed,
     )
 
+    speaker_map = {speaker: idx for idx, speaker in enumerate(sorted({row["speaker"] for row in rows}))}
+    for row in rows:
+        row["speaker_id"] = int(speaker_map[row["speaker"]])
+
     write_manifest_csv(manifests_dir / "all.csv", rows)
     write_jsonl(manifests_dir / "train.jsonl", train_rows)
     write_jsonl(manifests_dir / "dev.jsonl", dev_rows)
@@ -293,8 +347,17 @@ def main() -> None:
     repo_root = output_dir.parent.parent
     write_coqui_pipe_manifest(manifests_dir / "train_coqui.txt", train_rows, repo_root)
     write_coqui_pipe_manifest(manifests_dir / "dev_coqui.txt", dev_rows, repo_root)
+    write_manifest_bundle(manifests_dir / "train", train_rows, output_dir)
+    write_manifest_bundle(manifests_dir / "dev", dev_rows, output_dir)
+    write_manifest_bundle(manifests_dir / "test", test_rows, output_dir)
+    write_vits_filelist(filelists_dir / "train.txt", train_rows, output_dir)
+    write_vits_filelist(filelists_dir / "dev.txt", dev_rows, output_dir)
+    write_vits_filelist(filelists_dir / "test.txt", test_rows, output_dir)
 
     canonical_speaker, canonical_rows = dominant_speaker_rows(rows)
+    canonical_speaker_map = {canonical_speaker: 0}
+    for row in canonical_rows:
+        row["speaker_id"] = 0
     canonical_train, canonical_dev, canonical_test = row_random_split(
         rows=canonical_rows,
         dev_ratio=cfg.dev_ratio,
@@ -306,9 +369,20 @@ def main() -> None:
     write_jsonl(manifests_dir / "test_single_speaker.jsonl", canonical_test)
     write_coqui_pipe_manifest(manifests_dir / "train_single_speaker_coqui.txt", canonical_train, repo_root)
     write_coqui_pipe_manifest(manifests_dir / "dev_single_speaker_coqui.txt", canonical_dev, repo_root)
+    write_manifest_bundle(manifests_dir / "train_single_speaker", canonical_train, output_dir)
+    write_manifest_bundle(manifests_dir / "dev_single_speaker", canonical_dev, output_dir)
+    write_manifest_bundle(manifests_dir / "test_single_speaker", canonical_test, output_dir)
+    write_vits_filelist(filelists_dir / "train_single_speaker.txt", canonical_train, output_dir)
+    write_vits_filelist(filelists_dir / "dev_single_speaker.txt", canonical_dev, output_dir)
+    write_vits_filelist(filelists_dir / "test_single_speaker.txt", canonical_test, output_dir)
+    with (output_dir / "speaker_map.json").open("w", encoding="utf-8") as f:
+        json.dump(speaker_map, f, indent=2, ensure_ascii=False)
+    with (output_dir / "speaker_map_single_speaker.json").open("w", encoding="utf-8") as f:
+        json.dump(canonical_speaker_map, f, indent=2, ensure_ascii=False)
 
     stats = {
         "config": cfg.__dict__,
+        "sample_rate": cfg.target_sample_rate,
         "total_rows_after_filter": len(rows),
         "split_sizes": {
             "train": len(train_rows),
@@ -316,9 +390,11 @@ def main() -> None:
             "test": len(test_rows),
         },
         "unique_speakers": len({row["speaker"] for row in rows}),
+        "speaker_map_path": str(output_dir / "speaker_map.json"),
         "canonical_single_speaker": {
             "speaker": canonical_speaker,
             "rows": len(canonical_rows),
+            "speaker_map_path": str(output_dir / "speaker_map_single_speaker.json"),
             "split_sizes": {
                 "train": len(canonical_train),
                 "dev": len(canonical_dev),

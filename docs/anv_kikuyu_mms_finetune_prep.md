@@ -7,13 +7,13 @@ This workflow prepares the Hugging Face dataset [`Anv-ke/kikuyu`](https://huggin
 `scripts/prepare_anv_kikuyu_mms_tts.py` downloads and filters the dataset, normalizes text, resamples audio to 16 kHz, and writes:
 
 - `data/anv_kikuyu_mms_tts/clips/...`
-- `data/anv_kikuyu_mms_tts/manifests/{train,dev,dev_test}.jsonl`
-- `data/anv_kikuyu_mms_tts/manifests/{train,dev,dev_test}.tsv`
-- `data/anv_kikuyu_mms_tts/manifests/{train,dev,dev_test}.txt`
-- `data/anv_kikuyu_mms_tts/manifests/{train,dev,dev_test}.uid`
-- `data/anv_kikuyu_mms_tts/manifests/{train,dev,dev_test}.spk`
-- `data/anv_kikuyu_mms_tts/manifests/{train,dev,dev_test}.lang`
-- `data/anv_kikuyu_mms_tts/filelists/{train,dev,dev_test}.txt`
+- `data/anv_kikuyu_mms_tts/manifests/{train,dev,test}.jsonl`
+- `data/anv_kikuyu_mms_tts/manifests/{train,dev,test}.tsv`
+- `data/anv_kikuyu_mms_tts/manifests/{train,dev,test}.txt`
+- `data/anv_kikuyu_mms_tts/manifests/{train,dev,test}.uid`
+- `data/anv_kikuyu_mms_tts/manifests/{train,dev,test}.spk`
+- `data/anv_kikuyu_mms_tts/manifests/{train,dev,test}.lang`
+- `data/anv_kikuyu_mms_tts/filelists/{train,dev,test}.txt`
 
 The `.tsv/.txt/.uid/.spk/.lang` bundle is the fairseq-style manifest set. The filelists are a practical fallback for VITS-style training wrappers.
 
@@ -22,8 +22,9 @@ The `.tsv/.txt/.uid/.spk/.lang` bundle is the fairseq-style manifest set. The fi
 The default script configuration is intentionally conservative:
 
 - dataset: `Anv-ke/kikuyu`
-- splits: `train`, `dev`, `dev_test`
-- text: scripted only, from `actualSentence`
+- source splits: `train`, `validation`, `test`
+- output splits: `train`, `dev`, `test`
+- text: scripted rows from `actualSentence` on older exports or `transcription` on the current export
 - sample rate: `16000`
 - duration filter: `1s` to `15s`
 - speakers: all speakers retained
@@ -46,6 +47,59 @@ Optional flags:
 - `--include-unscripted`
 - `--speaker-mode dominant_only`
 - `--max-rows-per-split 5000`
+
+## Cheap Row Probe
+
+Before spending GPU time, prove that the gated ANV dataset can yield at least one usable audio/text row:
+
+```bash
+python scripts/prepare_anv_kikuyu_mms_tts.py \
+  --dataset-name Anv-ke/kikuyu \
+  --probe-one-row \
+  --probe-split train \
+  --probe-max-rows 200
+```
+
+This streams only the requested split, keeps `Audio(decode=False)`, prints the first row with usable text and audio payload metadata, and exits before writing clips or manifests. To also prove `ffmpeg` can decode that row without preparing the whole dataset, add `--probe-decode-audio`.
+
+For Hugging Face Jobs, run the same gate through the training wrapper:
+
+```bash
+hf jobs run --detach --flavor cpu-basic --timeout 30m --secrets HF_TOKEN \
+  --env ANV_SMOKE_ONLY=1 \
+  --env ANV_PROBE_SPLIT=train \
+  --env ANV_PROBE_MAX_ROWS=200 \
+  python:3.10 \
+  'git clone https://github.com/kihahu/kikuyu-tts.git /workspace/kikuyu-tts && bash /workspace/kikuyu-tts/scripts/hf_jobs_train_mms_tts_kik_anv.sh /workspace/kikuyu-tts'
+```
+
+Only after this succeeds should you run a decode smoke with `ANV_SMOKE_DECODE_AUDIO=1`, then a bounded prep-only job, and only then a GPU training job.
+
+Bounded prep-only job:
+
+```bash
+hf jobs run --detach --flavor cpu-basic --timeout 30m --secrets HF_TOKEN \
+  --env ANV_PREP_ONLY=1 \
+  --env ANV_STREAMING=1 \
+  --env ANV_STREAM_RETRIES=5 \
+  --env ANV_MAX_ROWS_PER_SPLIT=1 \
+  python:3.10 \
+  'git clone https://github.com/kihahu/kikuyu-tts.git /workspace/kikuyu-tts && bash /workspace/kikuyu-tts/scripts/hf_jobs_train_mms_tts_kik_anv.sh /workspace/kikuyu-tts'
+```
+
+Bootstrap-only checkpoint/resume gate:
+
+```bash
+hf jobs run --detach --flavor cpu-upgrade --timeout 2h --secrets HF_TOKEN \
+  --env ANV_BOOTSTRAP_ONLY=1 \
+  --env ANV_STREAMING=1 \
+  --env ANV_STREAM_RETRIES=8 \
+  --env ANV_MAX_ROWS_PER_SPLIT=1 \
+  python:3.10 \
+  'git clone https://github.com/kihahu/kikuyu-tts.git /workspace/kikuyu-tts && bash /workspace/kikuyu-tts/scripts/hf_jobs_train_mms_tts_kik_anv.sh /workspace/kikuyu-tts'
+```
+
+For a training-start smoke when the token cannot create or write the configured Hub repo, set `ANV_DISABLE_HUB_UPLOAD=1`. That skips repo creation and artifact sync but still runs local prep, bootstrap, and VITS training.
 
 ## Next Step: Full MMS Checkpoint
 
@@ -83,7 +137,156 @@ bash artifacts/anv_kikuyu_mms_finetune/launch_finetune.sh
 
 The launcher clones the official VITS repo if needed, builds monotonic alignment, stages the MMS full checkpoint into the VITS `logs/<run_name>` directory, and starts `train_ms.py`.
 
+## Latest ANV Continuation Checkpoint
+
+The first persisted ANV continuation run used 5,000 accepted rows per split in `single_speaker` mode, resumed from `kihahu/mms-tts-kik-waxal-v1` step `77100`, and uploaded artifacts to `kihahu/mms-tts-kik-waxal-anv-v1`.
+
+Human listening and the current proxy comparison still rank the Waxal continuation checkpoint as the best available sample set. Use Waxal `G_77100` as the default resume source for new ANV experiments unless the experiment is explicitly testing continued training from an ANV checkpoint:
+
+```bash
+--env KIK_TTS_RUN_NAME=mms_kik_waxal_anv_next_experiment \
+--env KIK_TTS_RESUME_REPO_ID=kihahu/mms-tts-kik-waxal-v1 \
+--env KIK_TTS_RESUME_RUN_NAME=mms_kik_waxal_single_speaker \
+--env KIK_TTS_RESUME_STEP=77100
+```
+
+Verified latest generator checkpoint:
+
+```text
+mms_vits_finetune/vits/logs/mms_kik_waxal_anv_single_speaker/G_4381800.pth
+```
+
+Matching discriminator checkpoint:
+
+```text
+mms_vits_finetune/vits/logs/mms_kik_waxal_anv_single_speaker/D_4381800.pth
+```
+
+To continue from this ANV checkpoint instead of restarting from the Waxal checkpoint, pass:
+
+```bash
+--env KIK_TTS_RUN_NAME=mms_kik_waxal_anv_next_experiment \
+--env KIK_TTS_RESUME_REPO_ID=kihahu/mms-tts-kik-waxal-anv-v1 \
+--env KIK_TTS_RESUME_RUN_NAME=mms_kik_waxal_anv_single_speaker \
+--env KIK_TTS_RESUME_STEP=4381800
+```
+
+The checkpoint was smoke-tested locally with:
+
+```bash
+python scripts/synthesize_mms_vits_checkpoint.py \
+  --repo-id kihahu/mms-tts-kik-waxal-anv-v1 \
+  --checkpoint mms_vits_finetune/vits/logs/mms_kik_waxal_anv_single_speaker/G_4381800.pth \
+  --config mms_vits_finetune/vits/logs/mms_kik_waxal_anv_single_speaker/config.json \
+  --vocab mms_vits_finetune/vits/logs/mms_kik_waxal_anv_single_speaker/vocab.txt \
+  --text 'Ni wega gukwona umuthi.' \
+  --output artifacts/tts_eval/anv_g4381800_smoke.wav \
+  --device cpu
+```
+
+## Evaluation Notes
+
+Local ASR-proxy comparison artifacts were written under:
+
+```text
+artifacts/tts_eval/anv_comparison/
+```
+
+Build a local listening page for the matched WAVs with:
+
+```bash
+python scripts/build_tts_listening_sheet.py \
+  --manifest artifacts/tts_eval/anv_comparison/manifest.csv \
+  --manifest artifacts/tts_eval/anv_comparison/length_scale_manifest.csv \
+  --manifest artifacts/tts_eval/anv_comparison/low_lr_manifest.csv \
+  --output artifacts/tts_eval/anv_comparison/listening_sheet.html \
+  --title 'Kikuyu TTS ANV Comparison'
+```
+
+The five-prompt ASR proxy did not prove that the ANV checkpoints are better than Waxal `G_77100`:
+
+```text
+waxal_g77100 mean_cer_proxy:              0.2118
+anv_g4381800 mean_cer_proxy:              0.4822
+anv_g4381800 length_scale=1.4 proxy:      0.5829
+anv_g4381800 length_scale=1.8 proxy:      0.5405
+anv_lr1e6_cap1k_g890300 mean_cer_proxy:   0.5750
+```
+
+Treat this as a weak intelligibility proxy, not a final MOS score. The next useful gate is human listening on the matched WAVs before spending more GPU on larger ANV runs.
+
+The ANV transcripts preserve Kikuyu diacritics by default. To test whether matching the ASCII style of the current Waxal/evaluation prompts improves adaptation, run a small separate experiment with:
+
+```bash
+--env ANV_ORTHOGRAPHY=strip_diacritics \
+--env KIK_TTS_RUN_NAME=mms_kik_waxal_anv_ascii_cap1k
+```
+
+Keep this as a separate run name so the resulting samples can be compared against `waxal_g77100`, which is still the best available reference.
+
+The first ASCII-aligned cap-1k experiment ran as HF Job `69fba3c4aff1cd33e8f2e958`, resumed from Waxal `G_77100`, used `ANV_ORTHOGRAPHY=strip_diacritics`, and was canceled after useful checkpoints uploaded to save GPU. Uploaded checkpoints:
+
+```text
+mms_vits_finetune/vits/logs/mms_kik_waxal_anv_ascii_cap1k/G_462600.pth
+mms_vits_finetune/vits/logs/mms_kik_waxal_anv_ascii_cap1k/D_462600.pth
+mms_vits_finetune/vits/logs/mms_kik_waxal_anv_ascii_cap1k/G_462700.pth
+mms_vits_finetune/vits/logs/mms_kik_waxal_anv_ascii_cap1k/D_462700.pth
+```
+
+Local comparison artifacts were added under `artifacts/tts_eval/anv_comparison/` and the listening sheet was regenerated. The ASR proxy still did not beat Waxal:
+
+```text
+waxal_g77100 mean_cer_proxy:                 0.2118
+anv_ascii_cap1k_g462600 mean_cer_proxy:      0.2644
+anv_ascii_cap1k_g462700 mean_cer_proxy:      0.5504
+```
+
+This suggests the first few ANV ASCII continuation steps move away from the best Waxal behavior quickly. For the next GPU experiment, do not continue this run blindly; prefer either a much smaller learning rate, a stronger data-quality filter, or a mixed Waxal+ANV schedule that anchors the original Waxal voice.
+
+## Mixed Waxal + ANV Anchor Experiment
+
+The HF Jobs ANV wrapper supports an opt-in mixed-data run. It prepares Waxal in the job, combines Waxal single-speaker filelists with the prepared ANV filelists, then bootstraps from the mixed prepared directory:
+
+```bash
+--env ANV_MIX_WAXAL=1 \
+--env WAXAL_MIX_REPEAT=1 \
+--env ANV_MIX_REPEAT=1 \
+--env ANV_ORTHOGRAPHY=strip_diacritics \
+--env KIK_TTS_RUN_NAME=mms_kik_waxal_anv_mixed_ascii_cap1k \
+--env KIK_TTS_RESUME_REPO_ID=kihahu/mms-tts-kik-waxal-v1 \
+--env KIK_TTS_RESUME_RUN_NAME=mms_kik_waxal_single_speaker \
+--env KIK_TTS_RESUME_STEP=77100 \
+--env KIK_TTS_LEARNING_RATE=0.0000003
+```
+
+Keep `ANV_MAX_ROWS_PER_SPLIT=1000` for the first mixed run, and stop after the first uploaded checkpoint pair if proxy/listening does not improve. The goal of this run is not more ANV exposure; it is testing whether Waxal anchoring prevents the rapid degradation seen in pure ANV continuation.
+
+The first mixed Waxal+ANV run was launched as HF Job `69fc49d5aff1cd33e8f2f305` and canceled after the first useful checkpoint pair uploaded:
+
+```text
+mms_vits_finetune/vits/logs/mms_kik_waxal_anv_mixed_ascii_cap1k/G_511800.pth
+mms_vits_finetune/vits/logs/mms_kik_waxal_anv_mixed_ascii_cap1k/D_511800.pth
+```
+
+Local comparison artifacts were added under `artifacts/tts_eval/anv_comparison/`:
+
+```text
+mixed_ascii_cap1k_g511800_manifest.csv
+mixed_ascii_cap1k_g511800_asr_proxy.csv
+p01..p05_anv_mixed_ascii_cap1k_g511800.wav
+```
+
+The mixed-anchor run did not preserve Waxal quality. Its generated clips were much shorter than the Waxal references for the same prompts, and the five-prompt ASR proxy was substantially worse:
+
+```text
+waxal_g77100 mean_cer_proxy:                    0.2118
+anv_ascii_cap1k_g462600 mean_cer_proxy:         0.2644
+anv_mixed_ascii_cap1k_g511800 mean_cer_proxy:   1.3664
+```
+
+Do not continue this mixed run. The current best checkpoint remains Waxal `G_77100`. Any next ANV experiment should change the data selection or training objective, not just spend more steps on this schedule.
+
 ## Notes
 
-- `dev_test` is kept because it exists in the ANV public dataset and is useful as a held-out evaluation split before touching the locked `test` set.
+- The current ANV dataset splits are `train`, `validation`, and `test`; the prep maps them to `train`, `dev`, and `test` for VITS/fairseq compatibility.
 - If the first full MMS run is unstable, keep the same prep but rerun with `--speaker-mode dominant_only` to reduce speaker variance before debugging optimizer or checkpoint issues.
