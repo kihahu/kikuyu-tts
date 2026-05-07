@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -33,6 +34,7 @@ DEFAULT_TTS_CHECKPOINT = "mms_vits_finetune/vits/logs/mms_kik_waxal_single_speak
 DEFAULT_TTS_CONFIG = "mms_vits_finetune/vits/logs/mms_kik_waxal_single_speaker/config.json"
 DEFAULT_TTS_VOCAB = "mms_vits_finetune/vits/logs/mms_kik_waxal_single_speaker/vocab.txt"
 TARGET_SAMPLE_RATE = 16_000
+HF_TOKEN_CACHE_PATH = Path("~/.cache/huggingface/token").expanduser()
 
 
 @dataclass(frozen=True)
@@ -195,6 +197,13 @@ def write_json(path: Path, captions: list[Caption]) -> None:
     path.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def read_cached_hf_token() -> str | None:
+    if not HF_TOKEN_CACHE_PATH.is_file():
+        return None
+    token = HF_TOKEN_CACHE_PATH.read_text(encoding="utf-8").strip()
+    return token or None
+
+
 def build_hub_auth(cli_token: str | None = None) -> dict[str, str]:
     if cli_token is not None and str(cli_token).strip():
         return {"token": str(cli_token).strip()}
@@ -202,6 +211,9 @@ def build_hub_auth(cli_token: str | None = None) -> dict[str, str]:
         raw = os.environ.get(key)
         if raw and raw.strip():
             return {"token": raw.strip()}
+    cached_token = read_cached_hf_token()
+    if cached_token:
+        return {"token": cached_token}
     return {}
 
 
@@ -330,13 +342,23 @@ def load_asr(
 
 def transcript_from_captions(captions: list[Caption]) -> str:
     parts: list[str] = []
-    previous = ""
+    previous_words: list[str] = []
     for caption in captions:
         text = " ".join(caption.text.split())
-        if not text or text == previous:
+        if not text:
             continue
-        parts.append(text)
-        previous = text
+        words = text.split()
+        overlap = 0
+        max_overlap = min(len(previous_words), len(words), 12)
+        for size in range(max_overlap, 0, -1):
+            if previous_words[-size:] == words[:size]:
+                overlap = size
+                break
+        new_words = words[overlap:]
+        if not new_words:
+            continue
+        parts.append(" ".join(new_words))
+        previous_words = words
     return " ".join(parts)
 
 
@@ -345,8 +367,44 @@ def write_transcript(path: Path, transcript: str) -> None:
     path.write_text(transcript + "\n", encoding="utf-8")
 
 
-def synthesize_captions(
-    captions: list[Caption],
+def split_transcript_for_tts(transcript: str, max_chars: int) -> list[str]:
+    if max_chars <= 0:
+        raise ValueError("max_chars must be positive.")
+
+    normalized = " ".join(transcript.split())
+    if not normalized:
+        return []
+
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    sentence_parts = [part.strip() for part in re.split(r"(?<=[.!?])\s+", normalized) if part.strip()]
+    if not sentence_parts:
+        sentence_parts = [normalized]
+
+    for sentence in sentence_parts:
+        words = sentence.split()
+        for word in words:
+            next_len = len(word) if current_len == 0 else current_len + 1 + len(word)
+            if current and next_len > max_chars:
+                chunks.append(" ".join(current))
+                current = [word]
+                current_len = len(word)
+            else:
+                current.append(word)
+                current_len = next_len
+        if current and current_len >= max_chars * 0.65:
+            chunks.append(" ".join(current))
+            current = []
+            current_len = 0
+
+    if current:
+        chunks.append(" ".join(current))
+    return chunks
+
+
+def synthesize_text_chunks(
+    texts: list[str],
     *,
     repo_id: str,
     checkpoint: str,
@@ -371,8 +429,8 @@ def synthesize_captions(
     sample_rate = int(tts.hps.data.sampling_rate)
     gap = np.zeros(max(0, int(round(gap_seconds * sample_rate))), dtype=np.float32)
     chunks: list[np.ndarray] = []
-    for caption in captions:
-        text = " ".join(caption.text.split())
+    for raw_text in texts:
+        text = " ".join(raw_text.split())
         if not text:
             continue
         audio = synthesize_text(
@@ -389,10 +447,14 @@ def synthesize_captions(
         chunks.append(audio)
 
     if not chunks:
-        raise RuntimeError("No TTS audio was generated from the ASR transcript.")
+        raise RuntimeError("No TTS audio was generated from the transcript.")
 
     output_wav.parent.mkdir(parents=True, exist_ok=True)
     sf.write(output_wav, np.concatenate(chunks), sample_rate, subtype="PCM_16")
+
+
+def synthesize_captions(captions: list[Caption], **kwargs) -> None:
+    synthesize_text_chunks([caption.text for caption in captions], **kwargs)
 
 
 def main() -> None:
@@ -408,8 +470,8 @@ def main() -> None:
     parser.add_argument("--target-lang", default="kik")
     parser.add_argument(
         "--token",
-        default=os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN"),
-        help="HF token for private models. Defaults to HF_TOKEN / HUGGING_FACE_HUB_TOKEN.",
+        default=None,
+        help="HF token for private models. Defaults to HF_TOKEN, HUGGING_FACE_HUB_TOKEN, then ~/.cache/huggingface/token.",
     )
     parser.add_argument("--asr-device", default="auto", choices=["auto", "cpu", "cuda", "mps"])
     parser.add_argument("--tts-device", default="auto", choices=["auto", "cpu", "cuda", "mps"])
@@ -424,11 +486,18 @@ def main() -> None:
     parser.add_argument("--noise-scale", type=float, default=0.667)
     parser.add_argument("--noise-scale-w", type=float, default=0.8)
     parser.add_argument("--length-scale", type=float, default=1.0)
-    parser.add_argument("--gap-seconds", type=float, default=0.2)
+    parser.add_argument(
+        "--audio-mode",
+        choices=["flowing", "captions"],
+        default="flowing",
+        help="flowing synthesizes the merged transcript; captions preserves the old cue-by-cue pacing.",
+    )
+    parser.add_argument("--max-tts-chars", type=int, default=240)
+    parser.add_argument("--gap-seconds", type=float, default=0.05)
     parser.add_argument("--output-wav", type=Path, default=Path("artifacts/youtube_tts/kikuyu_tts.wav"))
     parser.add_argument("--transcript-output", type=Path, default=Path("artifacts/youtube_tts/transcript.txt"))
-    parser.add_argument("--captions-output", type=Path, default=Path("artifacts/youtube_tts/captions.vtt"))
-    parser.add_argument("--json-output", type=Path, default=Path("artifacts/youtube_tts/captions.json"))
+    parser.add_argument("--captions-output", type=Path, default=None)
+    parser.add_argument("--json-output", type=Path, default=None)
     parser.add_argument("--keep-source-wav", type=Path, default=None)
     parser.add_argument("--print-transcript", action="store_true")
     args = parser.parse_args()
@@ -474,14 +543,21 @@ def main() -> None:
     if not transcript:
         raise RuntimeError("ASR produced no transcript; try lowering --min-rms or increasing --chunk-seconds.")
 
-    write_vtt(args.captions_output, captions)
-    write_json(args.json_output, captions)
+    if args.captions_output is not None:
+        write_vtt(args.captions_output, captions)
+    if args.json_output is not None:
+        write_json(args.json_output, captions)
     write_transcript(args.transcript_output, transcript)
     if args.print_transcript:
         print(transcript)
 
-    synthesize_captions(
-        captions,
+    tts_texts = (
+        split_transcript_for_tts(transcript, args.max_tts_chars)
+        if args.audio_mode == "flowing"
+        else [caption.text for caption in captions]
+    )
+    synthesize_text_chunks(
+        tts_texts,
         repo_id=args.tts_repo_id,
         checkpoint=args.tts_checkpoint,
         config=args.tts_config,
@@ -499,17 +575,24 @@ def main() -> None:
         "asr_model_id": args.asr_model_id,
         "tts_repo_id": args.tts_repo_id,
         "tts_checkpoint": args.tts_checkpoint,
+        "audio_mode": args.audio_mode,
         "caption_count": len(captions),
+        "tts_chunk_count": len(tts_texts),
         "transcript_output": str(args.transcript_output),
-        "captions_output": str(args.captions_output),
-        "json_output": str(args.json_output),
         "output_wav": str(args.output_wav),
     }
+    if args.captions_output is not None:
+        manifest["captions_output"] = str(args.captions_output)
+    if args.json_output is not None:
+        manifest["json_output"] = str(args.json_output)
     manifest_path = args.output_wav.with_suffix(".manifest.json")
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
     print(f"Wrote transcript to {args.transcript_output}")
-    print(f"Wrote captions to {args.captions_output}")
+    if args.captions_output is not None:
+        print(f"Wrote captions to {args.captions_output}")
+    if args.json_output is not None:
+        print(f"Wrote caption JSON to {args.json_output}")
     print(f"Wrote synthesized audio to {args.output_wav}")
     print(f"Wrote manifest to {manifest_path}")
 
