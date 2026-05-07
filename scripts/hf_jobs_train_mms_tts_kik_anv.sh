@@ -70,7 +70,31 @@ if [ "$ANV_PREP_ONLY" = "1" ]; then
   exit 0
 fi
 
+BOOTSTRAP_PREPARED_DIR="data/anv_kikuyu_mms_tts"
+if [ "${ANV_MIX_WAXAL:-0}" = "1" ]; then
+  python scripts/prepare_waxal_kik_tts.py \
+    --dataset-name google/WaxalNLP \
+    --dataset-config kik_tts \
+    --split train \
+    --output-dir data/waxal_kik_tts \
+    --target-sample-rate 16000 \
+    --min-duration-sec "${WAXAL_MIN_DURATION_SEC:-0.6}" \
+    --max-duration-sec "${WAXAL_MAX_DURATION_SEC:-25.0}" \
+    --min-rms "${WAXAL_MIN_RMS:-0.0035}" \
+    --seed "${WAXAL_SEED:-42}" \
+    --dev-ratio "${WAXAL_DEV_RATIO:-0.10}" \
+    --test-ratio "${WAXAL_TEST_RATIO:-0.05}"
+  python scripts/combine_mms_tts_filelists.py \
+    --anchor-dir data/waxal_kik_tts \
+    --target-dir data/anv_kikuyu_mms_tts \
+    --output-dir data/waxal_anv_mixed_mms_tts \
+    --anchor-repeat "${WAXAL_MIX_REPEAT:-1}" \
+    --target-repeat "${ANV_MIX_REPEAT:-1}"
+  BOOTSTRAP_PREPARED_DIR="data/waxal_anv_mixed_mms_tts"
+fi
+
 BOOTSTRAP_ARGS=()
+BOOTSTRAP_ARGS+=(--prepared-dir "$BOOTSTRAP_PREPARED_DIR")
 if [ -n "${KIK_TTS_RUN_NAME:-}" ]; then
   BOOTSTRAP_ARGS+=(--run-name "$KIK_TTS_RUN_NAME")
 fi

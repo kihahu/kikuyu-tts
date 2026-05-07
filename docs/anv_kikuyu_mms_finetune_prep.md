@@ -243,6 +243,24 @@ anv_ascii_cap1k_g462700 mean_cer_proxy:      0.5504
 
 This suggests the first few ANV ASCII continuation steps move away from the best Waxal behavior quickly. For the next GPU experiment, do not continue this run blindly; prefer either a much smaller learning rate, a stronger data-quality filter, or a mixed Waxal+ANV schedule that anchors the original Waxal voice.
 
+## Mixed Waxal + ANV Anchor Experiment
+
+The HF Jobs ANV wrapper supports an opt-in mixed-data run. It prepares Waxal in the job, combines Waxal single-speaker filelists with the prepared ANV filelists, then bootstraps from the mixed prepared directory:
+
+```bash
+--env ANV_MIX_WAXAL=1 \
+--env WAXAL_MIX_REPEAT=1 \
+--env ANV_MIX_REPEAT=1 \
+--env ANV_ORTHOGRAPHY=strip_diacritics \
+--env KIK_TTS_RUN_NAME=mms_kik_waxal_anv_mixed_ascii_cap1k \
+--env KIK_TTS_RESUME_REPO_ID=kihahu/mms-tts-kik-waxal-v1 \
+--env KIK_TTS_RESUME_RUN_NAME=mms_kik_waxal_single_speaker \
+--env KIK_TTS_RESUME_STEP=77100 \
+--env KIK_TTS_LEARNING_RATE=0.0000003
+```
+
+Keep `ANV_MAX_ROWS_PER_SPLIT=1000` for the first mixed run, and stop after the first uploaded checkpoint pair if proxy/listening does not improve. The goal of this run is not more ANV exposure; it is testing whether Waxal anchoring prevents the rapid degradation seen in pure ANV continuation.
+
 ## Notes
 
 - The current ANV dataset splits are `train`, `validation`, and `test`; the prep maps them to `train`, `dev`, and `test` for VITS/fairseq compatibility.
