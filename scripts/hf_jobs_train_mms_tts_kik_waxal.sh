@@ -33,6 +33,9 @@ python scripts/prepare_waxal_kik_tts.py \
   --test-ratio 0.05
 
 BOOTSTRAP_ARGS=()
+if [ -n "${KIK_TTS_RUN_NAME:-}" ]; then
+  BOOTSTRAP_ARGS+=(--run-name "$KIK_TTS_RUN_NAME")
+fi
 if [ -n "${KIK_TTS_EPOCHS:-}" ]; then
   BOOTSTRAP_ARGS+=(--epochs "$KIK_TTS_EPOCHS")
 fi
