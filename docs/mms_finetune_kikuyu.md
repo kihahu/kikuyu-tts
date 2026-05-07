@@ -64,6 +64,46 @@ hf jobs run --detach --flavor a10g-large --timeout 1h --secrets HF_TOKEN \
 
 The wrapper uploads in-progress and final artifacts to `kihahu/mms-tts-kik-waxal-v1` by default. Change `hub.repo_id` in `configs/train_mms_tts_kik_waxal.yaml` before launching if you want a different destination.
 
+### Waxal Checkpoint Continuation Notes
+
+The best current listening/proxy reference remains:
+
+```text
+mms_vits_finetune/vits/logs/mms_kik_waxal_single_speaker/G_77100.pth
+```
+
+Two follow-up Waxal-only continuation probes were run on HF Jobs with a very low learning rate (`KIK_TTS_LEARNING_RATE=0.0000003`) and isolated run names.
+
+Job `69fc4fceaff1cd33e8f2f362` used `KIK_TTS_EPOCHS=1`, resumed from `G_77100`, and completed without advancing because the VITS trainer resumes at absolute epoch `7011`. It only re-uploaded `G_77100/D_77100` under `mms_kik_waxal_continue_lr3e7`.
+
+Job `69fc5106317220dbbd1a5ad2` used an absolute epoch cap (`KIK_TTS_EPOCHS=7021`) and uploaded real continuation checkpoints:
+
+```text
+mms_vits_finetune/vits/logs/mms_kik_waxal_continue_lr3e7_e7021/G_77150.pth
+mms_vits_finetune/vits/logs/mms_kik_waxal_continue_lr3e7_e7021/D_77150.pth
+mms_vits_finetune/vits/logs/mms_kik_waxal_continue_lr3e7_e7021/G_77200.pth
+mms_vits_finetune/vits/logs/mms_kik_waxal_continue_lr3e7_e7021/D_77200.pth
+```
+
+Local evaluation artifacts were written under `artifacts/tts_eval/anv_comparison/`:
+
+```text
+waxal_continue_lr3e7_manifest.csv
+waxal_continue_lr3e7_asr_proxy.csv
+p01..p05_waxal_continue_lr3e7_g77150.wav
+p01..p05_waxal_continue_lr3e7_g77200.wav
+```
+
+The five-prompt ASR proxy did not improve:
+
+```text
+waxal_g77100 mean_cer_proxy:                 0.2118
+waxal_continue_lr3e7_g77150 mean_cer_proxy:  0.8205
+waxal_continue_lr3e7_g77200 mean_cer_proxy:  0.7558
+```
+
+Do not continue the low-LR Waxal-only run blindly. If revisiting Waxal continuation, use human listening first and change the training setup rather than only adding more epochs.
+
 ## Baseline Selection Path
 
 `scripts/prepare_mms_tts_finetune.py` does four things:
