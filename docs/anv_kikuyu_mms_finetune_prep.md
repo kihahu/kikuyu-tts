@@ -224,6 +224,25 @@ The ANV transcripts preserve Kikuyu diacritics by default. To test whether match
 
 Keep this as a separate run name so the resulting samples can be compared against `waxal_g77100`, which is still the best available reference.
 
+The first ASCII-aligned cap-1k experiment ran as HF Job `69fba3c4aff1cd33e8f2e958`, resumed from Waxal `G_77100`, used `ANV_ORTHOGRAPHY=strip_diacritics`, and was canceled after useful checkpoints uploaded to save GPU. Uploaded checkpoints:
+
+```text
+mms_vits_finetune/vits/logs/mms_kik_waxal_anv_ascii_cap1k/G_462600.pth
+mms_vits_finetune/vits/logs/mms_kik_waxal_anv_ascii_cap1k/D_462600.pth
+mms_vits_finetune/vits/logs/mms_kik_waxal_anv_ascii_cap1k/G_462700.pth
+mms_vits_finetune/vits/logs/mms_kik_waxal_anv_ascii_cap1k/D_462700.pth
+```
+
+Local comparison artifacts were added under `artifacts/tts_eval/anv_comparison/` and the listening sheet was regenerated. The ASR proxy still did not beat Waxal:
+
+```text
+waxal_g77100 mean_cer_proxy:                 0.2118
+anv_ascii_cap1k_g462600 mean_cer_proxy:      0.2644
+anv_ascii_cap1k_g462700 mean_cer_proxy:      0.5504
+```
+
+This suggests the first few ANV ASCII continuation steps move away from the best Waxal behavior quickly. For the next GPU experiment, do not continue this run blindly; prefer either a much smaller learning rate, a stronger data-quality filter, or a mixed Waxal+ANV schedule that anchors the original Waxal voice.
+
 ## Notes
 
 - The current ANV dataset splits are `train`, `validation`, and `test`; the prep maps them to `train`, `dev`, and `test` for VITS/fairseq compatibility.
