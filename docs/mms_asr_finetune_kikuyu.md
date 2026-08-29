@@ -70,7 +70,7 @@ python scripts/infer_mms_asr_kik.py \
   --audio /path/to/kikuyu_clip.wav
 ```
 
-If the job is interrupted, recover from the newest uploaded `checkpoint-*` directory in the Hub model repo and resume from that checkpoint in a follow-up run.
+If the job is interrupted and the output directory is preserved, the next run automatically resumes from the newest complete local `checkpoint-*` directory. Set `training.resume_from_checkpoint` to override that choice or set `training.auto_resume: false` to start fresh. For a new machine, download the newest uploaded `checkpoint-*` directory from the Hub model repo into the output directory before restarting.
 
 Other options:
 

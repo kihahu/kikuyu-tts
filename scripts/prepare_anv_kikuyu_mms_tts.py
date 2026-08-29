@@ -18,6 +18,7 @@ from typing import Any
 import numpy as np
 import soundfile as sf
 from datasets import Audio, DatasetDict, load_dataset
+from scipy.signal import resample_poly
 
 MULTISPACE_RE = re.compile(r"\s+")
 PUNCT_REPLACEMENTS = {
@@ -118,6 +119,10 @@ def write_summary_csv(path: Path, rows: list[dict[str, Any]]) -> None:
                 "duration_sec",
                 "num_samples",
                 "sample_rate",
+                "source_sample_rate",
+                "rms",
+                "peak_abs",
+                "clipped",
             ],
         )
         writer.writeheader()
@@ -216,6 +221,32 @@ def decode_audio_record(audio: dict[str, Any], target_sample_rate: int) -> tuple
     return samples.astype(np.float32), int(sample_rate)
 
 
+def resample_audio(samples: np.ndarray, source_rate: int, target_rate: int) -> np.ndarray:
+    mono = np.asarray(samples, dtype=np.float32)
+    if mono.ndim == 2:
+        mono = mono.mean(axis=1)
+    if source_rate == target_rate:
+        return mono
+    if source_rate <= 0 or target_rate <= 0:
+        raise ValueError(f"Invalid sample rate conversion {source_rate}->{target_rate}")
+    return resample_poly(mono, target_rate, source_rate).astype(np.float32)
+
+
+def audio_quality(samples: np.ndarray) -> tuple[float, float, float]:
+    values = np.asarray(samples, dtype=np.float32).reshape(-1)
+    if values.size == 0:
+        return 0.0, 0.0, 1.0
+    finite = np.isfinite(values)
+    finite_values = values[finite]
+    if finite_values.size == 0:
+        return 0.0, 0.0, 1.0
+    return (
+        float(np.sqrt(np.mean(np.square(finite_values), dtype=np.float64))),
+        float(np.max(np.abs(finite_values))),
+        float(np.mean(~finite)),
+    )
+
+
 def summarize_audio_record(audio: dict[str, Any]) -> dict[str, Any]:
     summary: dict[str, Any] = {
         "type": type(audio).__name__,
@@ -303,6 +334,7 @@ def main() -> None:
     parser.add_argument("--target-sample-rate", type=int, default=16000)
     parser.add_argument("--min-duration-sec", type=float, default=1.0)
     parser.add_argument("--max-duration-sec", type=float, default=15.0)
+    parser.add_argument("--min-rms", type=float, default=0.0035)
     parser.add_argument("--include-unscripted", action="store_true")
     parser.add_argument("--speaker-mode", choices=("all", "dominant_only", "single_speaker"), default="all")
     parser.add_argument("--orthography", choices=("preserve", "strip_diacritics"), default="preserve")
@@ -438,6 +470,16 @@ def main() -> None:
                             flush=True,
                         )
                         continue
+                    source_sample_rate = sample_rate
+                    samples = resample_audio(samples, source_sample_rate, args.target_sample_rate)
+                    sample_rate = args.target_sample_rate
+                    rms, peak_abs, nonfinite_ratio = audio_quality(samples)
+                    if nonfinite_ratio > 0:
+                        skip_reasons["nonfinite_audio"] += 1
+                        continue
+                    if rms < args.min_rms:
+                        skip_reasons["too_silent"] += 1
+                        continue
                     duration_sec = float(len(samples) / sample_rate) if sample_rate > 0 else 0.0
                     if duration_sec < args.min_duration_sec:
                         skip_reasons["too_short"] += 1
@@ -471,6 +513,10 @@ def main() -> None:
                             "duration_sec": round(duration_sec, 4),
                             "num_samples": int(len(samples)),
                             "sample_rate": sample_rate,
+                            "source_sample_rate": source_sample_rate,
+                            "rms": round(rms, 6),
+                            "peak_abs": round(peak_abs, 6),
+                            "clipped": peak_abs >= 0.999,
                         }
                     )
                     written_for_split += 1
@@ -529,11 +575,20 @@ def main() -> None:
         raise RuntimeError("No rows survived filtering. Relax filters or enable unscripted rows.")
 
     dominant_speaker = max(speaker_counts.items(), key=lambda item: (item[1], item[0]))[0]
+    dropped_for_speaker_mode = 0
     if args.speaker_mode == "dominant_only":
+        before = len(accepted_rows)
         accepted_rows = [row for row in accepted_rows if row["speaker"] == dominant_speaker]
+        dropped_for_speaker_mode = before - len(accepted_rows)
     elif args.speaker_mode == "single_speaker":
+        before = len(accepted_rows)
+        accepted_rows = [row for row in accepted_rows if row["speaker"] == dominant_speaker]
+        dropped_for_speaker_mode = before - len(accepted_rows)
         for row in accepted_rows:
             row["speaker"] = "anv_single_speaker"
+
+    if not accepted_rows:
+        raise RuntimeError("No rows survived the selected speaker mode.")
 
     speaker_map = {speaker: idx for idx, speaker in enumerate(sorted({row["speaker"] for row in accepted_rows}))}
     for row in accepted_rows:
@@ -545,6 +600,8 @@ def main() -> None:
 
     for split in split_map:
         rows = rows_by_split.get(split, [])
+        if not rows:
+            raise RuntimeError(f"Speaker mode {args.speaker_mode!r} left split {split!r} empty.")
         write_jsonl(manifests_dir / f"{split}.jsonl", rows)
         write_manifest_bundle(manifests_dir / split, rows, output_dir)
         write_vits_filelist(filelists_dir / f"{split}.txt", rows, output_dir)
@@ -561,6 +618,11 @@ def main() -> None:
         "orthography": args.orthography,
         "sample_rate": args.target_sample_rate,
         "dominant_speaker": dominant_speaker,
+        "dropped_for_speaker_mode": dropped_for_speaker_mode,
+        "quality_thresholds": {
+            "min_rms": args.min_rms,
+            "target_sample_rate": args.target_sample_rate,
+        },
         "total_rows": len(accepted_rows),
         "rows_per_split": {split: len(rows_by_split.get(split, [])) for split in DEFAULT_SPLITS},
         "unique_speakers": len({row["speaker"] for row in accepted_rows}),

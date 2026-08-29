@@ -5,7 +5,6 @@ import argparse
 import csv
 import json
 import re
-import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -15,6 +14,11 @@ import soundfile as sf
 import torch
 from transformers import AutoModelForCTC, AutoProcessor, AutoTokenizer, VitsModel
 
+try:
+    from scripts.normalize_kikuyu import normalize_kikuyu_text
+except ModuleNotFoundError:
+    from normalize_kikuyu import normalize_kikuyu_text
+
 
 DEFAULT_TTS_MODELS = [
     "facebook/mms-tts-kik",
@@ -22,7 +26,6 @@ DEFAULT_TTS_MODELS = [
     "BrianMwangi/African-Kikuyu-TTS",
 ]
 DEFAULT_ASR_MODEL = "kihahu/mms-asr-kik-waxal-ctc"
-MULTISPACE_RE = re.compile(r"\s+")
 
 
 @dataclass(frozen=True)
@@ -35,9 +38,7 @@ class AudioMetrics:
 
 
 def normalize_text(text: str) -> str:
-    text = unicodedata.normalize("NFKC", text or "")
-    text = text.lower().strip()
-    return MULTISPACE_RE.sub(" ", text)
+    return normalize_kikuyu_text(text)
 
 
 def read_prompts(path: Path) -> list[str]:

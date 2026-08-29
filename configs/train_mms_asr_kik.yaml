@@ -10,8 +10,7 @@ dataset:
   text_column: text
   train_splits:
     - train
-    - validation
-  eval_split: test
+  eval_split: validation
   min_audio_seconds: 0.5
   max_audio_seconds: 30.0
 
@@ -36,6 +35,7 @@ training:
   report_to: none
   # MLflow run title (optional). If null and report_to includes mlflow, the script picks a timestamped name.
   run_name: null
+  auto_resume: true
 
 runtime:
   num_proc: 1

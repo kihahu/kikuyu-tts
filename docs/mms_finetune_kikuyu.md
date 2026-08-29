@@ -74,6 +74,8 @@ mms_vits_finetune/vits/logs/mms_kik_waxal_single_speaker/G_77100.pth
 
 Two follow-up Waxal-only continuation probes were run on HF Jobs with a very low learning rate (`KIK_TTS_LEARNING_RATE=0.0000003`) and isolated run names.
 
+The VITS bootstrap now automatically resumes from the newest complete local generator/discriminator checkpoint when the run directory is preserved. If no local pair is available, it discovers the newest matching pair in the configured Hub repository. Pass `--resume-step` to override discovery, or `--no-auto-resume` to start from the base checkpoint.
+
 Job `69fc4fceaff1cd33e8f2f362` used `KIK_TTS_EPOCHS=1`, resumed from `G_77100`, and completed without advancing because the VITS trainer resumes at absolute epoch `7011`. It only re-uploaded `G_77100/D_77100` under `mms_kik_waxal_continue_lr3e7`.
 
 Job `69fc5106317220dbbd1a5ad2` used an absolute epoch cap (`KIK_TTS_EPOCHS=7021`) and uploaded real continuation checkpoints:

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from fnmatch import fnmatch
 from pathlib import Path
+import re
 from typing import Any
 
 import evaluate
@@ -26,7 +27,10 @@ from transformers import (
 )
 from transformers.data.data_collator import DataCollatorMixin
 
-from normalize_kikuyu import normalize_kikuyu_text
+try:
+    from normalize_kikuyu import normalize_kikuyu_text
+except ModuleNotFoundError:  # pragma: no cover - exercised when imported as scripts.train_mms_asr_kik.
+    from scripts.normalize_kikuyu import normalize_kikuyu_text
 
 DEFAULT_HUB_REQUIRED_FILES = [
     "config.json",
@@ -39,6 +43,7 @@ DEFAULT_HUB_REQUIRED_FILES = [
     "dataset_summary.json",
 ]
 FINAL_UPLOAD_IGNORE_PATTERNS = ["checkpoint-*", "checkpoint-*/*"]
+CHECKPOINT_STEP_RE = re.compile(r"^checkpoint-(\d+)$")
 
 
 def read_yaml(path: Path) -> dict[str, Any]:
@@ -48,6 +53,17 @@ def read_yaml(path: Path) -> dict[str, Any]:
 
 def resolve_repo_path(repo_root: Path, value: str) -> Path:
     return (repo_root / value).resolve()
+
+
+def find_latest_checkpoint(output_dir: Path) -> Path | None:
+    candidates: list[tuple[int, Path]] = []
+    if not output_dir.is_dir():
+        return None
+    for path in output_dir.iterdir():
+        match = CHECKPOINT_STEP_RE.fullmatch(path.name)
+        if match and path.is_dir() and (path / "trainer_state.json").is_file():
+            candidates.append((int(match.group(1)), path))
+    return max(candidates, key=lambda item: item[0])[1] if candidates else None
 
 
 def _reports_to_mlflow(report_to: str | list[str] | None) -> bool:
@@ -91,7 +107,7 @@ def preflight_hub_repo(
     repo_id: str,
     private: bool | None,
     token: str,
-    create_pr: bool,
+    create_pr: bool = False,
 ) -> None:
     timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     sentinel_path = f".publish_preflight/{timestamp}.json"
@@ -256,7 +272,7 @@ class HubCheckpointUploadCallback(TrainerCallback):
         token: str,
         processor: Any,
         upload_every_n_saves: int,
-        create_pr: bool,
+        create_pr: bool = False,
     ) -> None:
         self.api = api
         self.repo_id = repo_id
@@ -288,7 +304,10 @@ class HubCheckpointUploadCallback(TrainerCallback):
 
 def load_training_dataset(config: dict[str, Any]) -> DatasetDict:
     dataset_cfg = config["dataset"]
-    raw = load_dataset(dataset_cfg["name"], dataset_cfg["config"])
+    load_kwargs = {}
+    if dataset_cfg.get("revision"):
+        load_kwargs["revision"] = dataset_cfg["revision"]
+    raw = load_dataset(dataset_cfg["name"], dataset_cfg["config"], **load_kwargs)
 
     train_splits = dataset_cfg.get("train_splits", ["train", "validation"])
     train_parts = [raw[split] for split in train_splits]
@@ -323,7 +342,8 @@ def prepare_datasets(
 
     def prepare_example(example: dict[str, Any]) -> dict[str, Any]:
         audio = example["audio"]
-        text = normalize_kikuyu_text(str(example[text_column]))
+        raw_text = example.get(text_column)
+        text = normalize_kikuyu_text(str(raw_text)) if raw_text is not None else ""
         example["input_values"] = processor(
             audio["array"],
             sampling_rate=audio["sampling_rate"],
@@ -340,13 +360,23 @@ def prepare_datasets(
         num_proc=num_proc,
     )
     prepared["train"] = prepared["train"].filter(
-        lambda length: min_audio_seconds <= length <= max_audio_seconds,
-        input_columns=["input_length"],
+        lambda length, text, labels, oov: (
+            min_audio_seconds <= length <= max_audio_seconds
+            and bool(text)
+            and bool(labels)
+            and oov == 0
+        ),
+        input_columns=["input_length", "target_text", "labels", "oov_char_count"],
         num_proc=num_proc,
     )
     prepared["eval"] = prepared["eval"].filter(
-        lambda length: min_audio_seconds <= length <= max_audio_seconds,
-        input_columns=["input_length"],
+        lambda length, text, labels, oov: (
+            min_audio_seconds <= length <= max_audio_seconds
+            and bool(text)
+            and bool(labels)
+            and oov == 0
+        ),
+        input_columns=["input_length", "target_text", "labels", "oov_char_count"],
         num_proc=num_proc,
     )
     return prepared
@@ -434,9 +464,12 @@ def main() -> None:
             create_pr=hub_create_pr,
         )
 
+    model_revision = model_cfg.get("revision")
+    model_load_kwargs = {"revision": model_revision} if model_revision else {}
     processor = AutoProcessor.from_pretrained(
         model_cfg["name"],
         target_lang=model_cfg["target_lang"],
+        **model_load_kwargs,
     )
     model = Wav2Vec2ForCTC.from_pretrained(
         model_cfg["name"],
@@ -444,6 +477,7 @@ def main() -> None:
         ignore_mismatched_sizes=True,
         ctc_loss_reduction="mean",
         pad_token_id=processor.tokenizer.pad_token_id,
+        **model_load_kwargs,
     )
     model.freeze_feature_encoder()
     model.config.ctc_zero_infinity = True
@@ -461,12 +495,19 @@ def main() -> None:
 
     output_dir = resolve_repo_path(repo_root, outputs_cfg["output_dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
+    resume_from_checkpoint = training_cfg.get("resume_from_checkpoint")
+    if resume_from_checkpoint is None and bool(training_cfg.get("auto_resume", True)):
+        latest_checkpoint = find_latest_checkpoint(output_dir)
+        if latest_checkpoint is not None:
+            resume_from_checkpoint = str(latest_checkpoint)
 
     summary = summarize_dataset(prepared)
     summary["model_name"] = model_cfg["name"]
     summary["target_lang"] = model_cfg["target_lang"]
     summary["dataset_name"] = config["dataset"]["name"]
     summary["dataset_config"] = config["dataset"]["config"]
+    summary["dataset_revision"] = config["dataset"].get("revision")
+    summary["model_revision"] = model_cfg.get("revision")
     with (output_dir / "dataset_summary.json").open("w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, ensure_ascii=False)
 
@@ -526,7 +567,7 @@ def main() -> None:
             )
         )
 
-    trainer.train(resume_from_checkpoint=training_cfg.get("resume_from_checkpoint"))
+    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
     trainer.save_model(str(output_dir))
     processor.save_pretrained(str(output_dir))
     metrics = trainer.evaluate()

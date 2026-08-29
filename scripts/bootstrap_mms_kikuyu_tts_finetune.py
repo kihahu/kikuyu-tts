@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import tarfile
 import urllib.request
@@ -10,6 +11,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+CHECKPOINT_STEP_RE = re.compile(r"^G_(\d+)\.pth$")
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -97,6 +100,38 @@ def download_hub_file(repo_id: str, filename: str, output_path: Path) -> Path:
     return output_path
 
 
+def checkpoint_step_from_files(files: list[str], prefix: str) -> int | None:
+    steps = {
+        int(match.group(1))
+        for path in files
+        if path.startswith(f"{prefix}/G_")
+        and (match := CHECKPOINT_STEP_RE.fullmatch(Path(path).name))
+        and f"{prefix}/D_{match.group(1)}.pth" in files
+    }
+    return max(steps) if steps else None
+
+
+def latest_local_checkpoint_step(run_dir: Path) -> int | None:
+    if not run_dir.is_dir():
+        return None
+    steps = {
+        int(match.group(1))
+        for path in run_dir.glob("G_*.pth")
+        if (match := CHECKPOINT_STEP_RE.fullmatch(path.name))
+        and (run_dir / f"D_{match.group(1)}.pth").is_file()
+    }
+    return max(steps) if steps else None
+
+
+def latest_hub_checkpoint_step(repo_id: str, prefix: str) -> int | None:
+    if not repo_id:
+        return None
+    from huggingface_hub import HfApi
+
+    files = HfApi().list_repo_files(repo_id=repo_id, repo_type="model")
+    return checkpoint_step_from_files(files, prefix)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Bootstrap MMS Kikuyu TTS fine-tuning with a prepared VITS filelist dataset."
@@ -119,6 +154,7 @@ def main() -> None:
     parser.add_argument("--resume-repo-id", default="")
     parser.add_argument("--resume-step", type=int, default=0)
     parser.add_argument("--resume-run-name", default="")
+    parser.add_argument("--auto-resume", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--download-checkpoint", action="store_true")
     args = parser.parse_args()
 
@@ -178,23 +214,35 @@ def main() -> None:
     resume_run_name = args.resume_run_name or training_cfg.get("resume_run_name", run_name)
     resume_checkpoint_dir = Path("")
     resume_iteration = 0
+    local_resume_dir: Path | None = None
+    resume_prefix = f"mms_vits_finetune/vits/logs/{resume_run_name}"
+    if not resume_step and args.auto_resume:
+        local_run_dir = output_dir / "vits" / "logs" / run_name
+        resume_step = latest_local_checkpoint_step(local_run_dir) or 0
+        if resume_step:
+            local_resume_dir = local_run_dir
+        if not resume_step:
+            resume_step = latest_hub_checkpoint_step(resume_repo_id or hub_repo_id, resume_prefix) or 0
     if resume_step:
-        resume_repo_id = resume_repo_id or hub_repo_id
-        if not resume_repo_id:
-            raise ValueError("--resume-step requires --resume-repo-id or hub.repo_id in config")
-        resume_checkpoint_dir = output_dir / "resume_checkpoint"
-        resume_prefix = f"mms_vits_finetune/vits/logs/{resume_run_name}"
-        resume_g = download_hub_file(
-            resume_repo_id,
-            f"{resume_prefix}/G_{resume_step}.pth",
-            resume_checkpoint_dir / f"G_{resume_step}.pth",
-        )
-        download_hub_file(
-            resume_repo_id,
-            f"{resume_prefix}/D_{resume_step}.pth",
-            resume_checkpoint_dir / f"D_{resume_step}.pth",
-        )
-        resume_iteration = read_checkpoint_iteration(resume_g)
+        if local_resume_dir is not None:
+            resume_checkpoint_dir = local_resume_dir
+            resume_iteration = read_checkpoint_iteration(resume_checkpoint_dir / f"G_{resume_step}.pth")
+        else:
+            resume_repo_id = resume_repo_id or hub_repo_id
+            if not resume_repo_id:
+                raise ValueError("--resume-step requires --resume-repo-id or hub.repo_id in config")
+            resume_checkpoint_dir = output_dir / "resume_checkpoint"
+            resume_g = download_hub_file(
+                resume_repo_id,
+                f"{resume_prefix}/G_{resume_step}.pth",
+                resume_checkpoint_dir / f"G_{resume_step}.pth",
+            )
+            download_hub_file(
+                resume_repo_id,
+                f"{resume_prefix}/D_{resume_step}.pth",
+                resume_checkpoint_dir / f"D_{resume_step}.pth",
+            )
+            resume_iteration = read_checkpoint_iteration(resume_g)
 
     base_iteration = read_checkpoint_iteration(checkpoint_dir / "G_100000.pth")
     start_iteration = resume_iteration or base_iteration
